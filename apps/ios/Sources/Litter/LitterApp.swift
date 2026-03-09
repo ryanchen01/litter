@@ -64,7 +64,9 @@ struct ContentView: View {
         }
         .environmentObject(appState)
         .onAppear {
-            if !serverManager.hasAnyConnection {
+            let forceDiscoveryForUITest =
+                ProcessInfo.processInfo.environment["CODEXIOS_UI_TEST_FORCE_DISCOVERY"] == "1"
+            if forceDiscoveryForUITest || !serverManager.hasAnyConnection {
                 appState.showServerPicker = true
             }
         }

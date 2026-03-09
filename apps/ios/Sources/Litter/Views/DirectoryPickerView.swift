@@ -666,6 +666,7 @@ struct DirectoryPickerView: View {
         }
         .scrollContentBackground(.hidden)
         .animation(.easeInOut(duration: 0.2), value: model.recentEntries)
+        .accessibilityIdentifier("directoryPicker.list")
     }
 
     private var bottomActionBar: some View {
@@ -705,6 +706,7 @@ struct DirectoryPickerView: View {
                         onDirectorySelected?(selectedServerId, model.currentPath)
                     }
                 }
+                .accessibilityIdentifier("directoryPicker.selectFolderButton")
                 .disabled(!canSelectPath)
                 .buttonStyle(.plain)
                 .font(LitterFont.monospaced(.subheadline))

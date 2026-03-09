@@ -245,6 +245,7 @@ struct SessionSidebarView: View {
             Divider().background(LitterTheme.separator)
             settingsRow
         }
+        .accessibilityIdentifier("sidebar.container")
     }
 
     private var selectedServerFilterId: String? {
@@ -356,6 +357,7 @@ struct SessionSidebarView: View {
             .padding(.vertical, 12)
             .modifier(GlassRectModifier(cornerRadius: 8, tint: LitterTheme.accent))
         }
+        .accessibilityIdentifier("sidebar.newSessionButton")
         .padding(16)
     }
 
@@ -375,6 +377,7 @@ struct SessionSidebarView: View {
                     withAnimation(.easeInOut(duration: 0.25)) { appState.sidebarOpen = false }
                     appState.showServerPicker = true
                 }
+                .accessibilityIdentifier("sidebar.connectButton")
                 .font(LitterFont.monospaced(.caption))
                 .foregroundColor(LitterTheme.accent)
             } else {
@@ -389,6 +392,7 @@ struct SessionSidebarView: View {
                     withAnimation(.easeInOut(duration: 0.25)) { appState.sidebarOpen = false }
                     appState.showServerPicker = true
                 }
+                .accessibilityIdentifier("sidebar.addServerButton")
                 .font(LitterFont.monospaced(.caption))
                 .foregroundColor(LitterTheme.accent)
                 if let activeThread {
@@ -729,6 +733,7 @@ struct SessionSidebarView: View {
                                 .foregroundColor(.white)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
+                                .accessibilityIdentifier("sidebar.sessionTitle")
 
                             if thread.isFork {
                                 Text("Fork")
@@ -770,6 +775,9 @@ struct SessionSidebarView: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("sidebar.sessionRow")
                 .onTapGesture(perform: onSelectSession)
             }
 

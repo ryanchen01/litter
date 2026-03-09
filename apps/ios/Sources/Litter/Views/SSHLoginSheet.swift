@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SSHLoginSheet: View {
     let server: DiscoveredServer
-    let onConnect: (ConnectionTarget) -> Void
+    let onConnect: (ConnectionTarget, String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var username = ""
@@ -15,6 +15,17 @@ struct SSHLoginSheet: View {
     @State private var loadedSavedCredentials = false
     @State private var isConnecting = false
     @State private var errorMessage: String?
+
+    private var sshPort: Int {
+        Int(server.port ?? 22)
+    }
+
+    private var hostDisplay: String {
+        if sshPort == 22 {
+            return server.hostname
+        }
+        return "\(server.hostname):\(sshPort)"
+    }
 
     var body: some View {
         NavigationStack {
@@ -29,7 +40,7 @@ struct SSHLoginSheet: View {
                                 Text(server.name)
                                     .font(LitterFont.monospaced(.subheadline))
                                     .foregroundColor(.white)
-                                Text(server.hostname)
+                                Text(hostDisplay)
                                     .font(LitterFont.monospaced(.caption))
                                     .foregroundColor(LitterTheme.textSecondary)
                             }
@@ -170,22 +181,33 @@ struct SSHLoginSheet: View {
         Task {
             do {
                 let ssh = SSHSessionManager.shared
-                try await ssh.connect(host: server.hostname, credentials: credentials)
+                try await ssh.connect(host: server.hostname, port: sshPort, credentials: credentials)
                 let port = try await ssh.startRemoteServer()
+                let detectedWakeMAC = await ssh.discoverWakeMACAddress()
                 var remoteHost = server.hostname
                     .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
                     .replacingOccurrences(of: "%25", with: "%")
                 if !remoteHost.contains(":"), let pct = remoteHost.firstIndex(of: "%") {
                     remoteHost = String(remoteHost[..<pct])
                 }
-                let target = ConnectionTarget.remote(host: remoteHost, port: port)
+                let target: ConnectionTarget
+                if server.sshPortForwardingEnabled {
+                    let localPort = try await ssh.establishLocalPortForward(remotePort: port)
+                    target = .remote(host: "127.0.0.1", port: localPort)
+                } else {
+                    target = .remote(host: remoteHost, port: port)
+                }
 
                 do {
                     if rememberCredentials {
-                        try SSHCredentialStore.shared.save(savedCredential(from: credentials), host: server.hostname)
+                        try SSHCredentialStore.shared.save(
+                            savedCredential(from: credentials),
+                            host: server.hostname,
+                            port: sshPort
+                        )
                         hasSavedCredentials = true
                     } else {
-                        try SSHCredentialStore.shared.delete(host: server.hostname)
+                        try SSHCredentialStore.shared.delete(host: server.hostname, port: sshPort)
                         hasSavedCredentials = false
                     }
                 } catch {
@@ -194,7 +216,7 @@ struct SSHLoginSheet: View {
 
                 clearSensitiveInput()
                 isConnecting = false
-                onConnect(target)
+                onConnect(target, detectedWakeMAC)
             } catch {
                 isConnecting = false
                 errorMessage = error.localizedDescription
@@ -207,7 +229,7 @@ struct SSHLoginSheet: View {
         loadedSavedCredentials = true
 
         do {
-            guard let saved = try SSHCredentialStore.shared.load(host: server.hostname) else {
+            guard let saved = try SSHCredentialStore.shared.load(host: server.hostname, port: sshPort) else {
                 hasSavedCredentials = false
                 return
             }
@@ -231,7 +253,7 @@ struct SSHLoginSheet: View {
 
     private func forgetSavedCredentials() {
         do {
-            try SSHCredentialStore.shared.delete(host: server.hostname)
+            try SSHCredentialStore.shared.delete(host: server.hostname, port: sshPort)
             hasSavedCredentials = false
             rememberCredentials = false
             clearSensitiveInput()

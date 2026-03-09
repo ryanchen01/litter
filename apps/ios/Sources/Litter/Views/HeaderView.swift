@@ -23,6 +23,7 @@ struct HeaderView: View {
                     .font(.system(.title3, weight: .medium))
                     .foregroundColor(Color(hex: "#999999"))
             }
+            .accessibilityIdentifier("header.sidebarButton")
 
             Button { showModelSelector = true } label: {
                 HStack(spacing: 6) {
@@ -118,6 +119,7 @@ struct HeaderView: View {
             }
             .frame(width: 18, height: 18)
         }
+        .accessibilityIdentifier("header.reloadButton")
         .disabled(isReloading || !serverManager.hasAnyConnection)
     }
 }

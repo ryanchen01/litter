@@ -122,6 +122,21 @@ targets:
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGNING_ALLOWED: false
         CODE_SIGNING_REQUIRED: false
+  CodexIOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Tests/CodexIOSUITests
+      - path: SnapshotHelper.swift
+    dependencies:
+      - target: Litter
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: Litter
+        CODE_SIGNING_ALLOWED: false
+        CODE_SIGNING_REQUIRED: false
 
 schemes:
   LitterRemote:
@@ -151,6 +166,7 @@ schemes:
       config: Debug
       targets:
         - CodexIOSTests
+        - CodexIOSUITests
     profile:
       config: Release
     analyze:

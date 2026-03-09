@@ -241,14 +241,20 @@ final class ServerManager: ObservableObject {
 
     func addServer(_ server: DiscoveredServer, target: ConnectionTarget) async {
         if let existing = connections[server.id] {
-            configureConnectionCallbacks(existing, serverId: server.id)
-            if !existing.isConnected {
-                await existing.connect()
-                if existing.isConnected {
-                    await refreshSessions(for: server.id)
+            if existing.server == server && existing.target == target {
+                configureConnectionCallbacks(existing, serverId: server.id)
+                if !existing.isConnected {
+                    await existing.connect()
+                    if existing.isConnected {
+                        await refreshSessions(for: server.id)
+                    }
                 }
+                return
             }
-            return
+
+            existing.disconnect()
+            connections.removeValue(forKey: server.id)
+            connectionSubscriptions.removeValue(forKey: server.id)
         }
 
         let conn = ServerConnection(server: server, target: target)

@@ -54,13 +54,21 @@ class ServerManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val threadsByKey = LinkedHashMap<ThreadKey, ThreadState>()
     private val transportsByServerId = LinkedHashMap<String, BridgeRpcTransport>()
+    private val openCodeClientsByServerId = LinkedHashMap<String, OpenCodeClient>()
     private val serversById = LinkedHashMap<String, ServerConfig>()
     private val accountByServerId = LinkedHashMap<String, AccountState>()
+    private val capabilitiesByServerId = LinkedHashMap<String, BackendCapabilities>()
+    private val availableModelsByServerId = LinkedHashMap<String, List<ModelOption>>()
+    private val selectedModelByServerId = LinkedHashMap<String, ModelSelection>()
+    private val slashByServerId = LinkedHashMap<String, List<SlashEntry>>()
+    private val agentOptionsByServerId = LinkedHashMap<String, List<OpenCodeAgentOption>>()
+    private val selectedAgentByServerId = LinkedHashMap<String, String?>()
     private val liveItemMessageIndices = LinkedHashMap<ThreadKey, MutableMap<String, Int>>()
     private val liveTurnDiffMessageIndices = LinkedHashMap<ThreadKey, MutableMap<String, Int>>()
     private val serversUsingItemNotifications = HashSet<String>()
     private val threadTurnCounts = LinkedHashMap<ThreadKey, Int>()
     private val pendingApprovalsById = LinkedHashMap<String, PendingApproval>()
+    private val pendingQuestionsById = LinkedHashMap<String, PendingQuestion>()
     private val agentDirectory = AgentDirectory()
 
     private val appContext = context?.applicationContext
@@ -104,6 +112,7 @@ class ServerManager(
             val result = runCatching {
                 val server = connectLocalDefaultServerInternal()
                 refreshSessionsInternal(server.id)
+                refreshOpenCodeMetadataInternal(server.id)
                 loadModelsInternal(server.id)
                 refreshAccountStateInternal(server.id)
                 server
@@ -136,6 +145,7 @@ class ServerManager(
             val result = runCatching {
                 val connected = connectServerInternal(server)
                 refreshSessionsInternal(connected.id)
+                refreshOpenCodeMetadataInternal(connected.id)
                 loadModelsInternal(connected.id)
                 refreshAccountStateInternal(connected.id)
                 connected
@@ -158,17 +168,27 @@ class ServerManager(
             val result = runCatching {
                 val saved = loadSavedServersInternal()
                 val connected = mutableListOf<ServerConfig>()
+                val errors = mutableListOf<Throwable>()
                 for (savedServer in saved) {
                     runCatching {
                         val cfg = savedServer.toServerConfig()
                         val connectedServer = connectServerInternal(cfg)
                         refreshSessionsInternal(connectedServer.id)
+                        refreshOpenCodeMetadataInternal(connectedServer.id)
                         refreshAccountStateInternal(connectedServer.id)
                         connected += connectedServer
-                    }
+                    }.onFailure { errors += it }
                 }
                 if (connected.isNotEmpty()) {
                     loadModelsInternal(connected.first().id)
+                } else if (saved.isNotEmpty() && errors.isNotEmpty()) {
+                    // Had saved servers but none connected — mark as error so UI shows offline state
+                    updateState {
+                        it.copy(
+                            connectionStatus = ServerConnectionStatus.ERROR,
+                            connectionError = errors.firstOrNull()?.message ?: "Server unreachable",
+                        )
+                    }
                 }
                 connected
             }
@@ -184,6 +204,24 @@ class ServerManager(
 
     fun removeServer(serverId: String) {
         disconnect(serverId)
+    }
+
+    fun removeSavedServer(serverId: String) {
+        submit {
+            // Remove from in-memory maps if present
+            runCatching { transportsByServerId.remove(serverId)?.close() }
+            runCatching { openCodeClientsByServerId.remove(serverId)?.close() }
+            serversById.remove(serverId)
+            accountByServerId.remove(serverId)
+            capabilitiesByServerId.remove(serverId)
+            slashByServerId.remove(serverId)
+            agentOptionsByServerId.remove(serverId)
+            selectedAgentByServerId.remove(serverId)
+            threadsByKey.entries.removeAll { it.key.serverId == serverId }
+            // Persist the updated list (explicitly removing this server ID)
+            persistSavedServersInternal(removedServerIds = setOf(serverId))
+            updateState { it }
+        }
     }
 
     fun refreshSessions(onComplete: ((Result<List<ThreadState>>) -> Unit)? = null) {
@@ -314,10 +352,14 @@ class ServerManager(
     ) {
         submit {
             updateState { current ->
+                val serverId = current.activeServerId
                 val next = current.selectedModel.copy(
                     modelId = modelId ?: current.selectedModel.modelId,
                     reasoningEffort = reasoningEffort ?: current.selectedModel.reasoningEffort,
                 )
+                if (serverId != null) {
+                    selectedModelByServerId[serverId] = next
+                }
                 current.copy(selectedModel = next)
             }
         }
@@ -339,6 +381,18 @@ class ServerManager(
     ) {
         submit {
             val pending = pendingApprovalsById.remove(approvalId) ?: return@submit
+            val server = serversById[pending.serverId]
+            if (server?.backendKind == BackendKind.OPENCODE) {
+                val reply =
+                    when (decision) {
+                        ApprovalDecision.ACCEPT -> "once"
+                        ApprovalDecision.ACCEPT_FOR_SESSION -> "always"
+                        ApprovalDecision.DECLINE, ApprovalDecision.CANCEL -> "reject"
+                    }
+                requireOpenCodeClient(pending.serverId).replyPermission(pending.requestId, reply)
+                commitState(state.copy(connectionError = null))
+                return@submit
+            }
             val decisionValue = approvalDecisionValue(method = pending.method, decision = decision)
             val transport = transportsByServerId[pending.serverId]
             if (transport != null) {
@@ -347,6 +401,25 @@ class ServerManager(
                     result = JSONObject().put("decision", decisionValue),
                 )
             }
+            updateState { it.copy(connectionError = null) }
+        }
+    }
+
+    fun respondToPendingQuestion(
+        questionId: String,
+        answers: List<List<String>>,
+    ) {
+        submit {
+            val pending = pendingQuestionsById.remove(questionId) ?: return@submit
+            requireOpenCodeClient(pending.serverId).replyQuestion(pending.requestId, answers)
+            updateState { it.copy(connectionError = null) }
+        }
+    }
+
+    fun rejectPendingQuestion(questionId: String) {
+        submit {
+            val pending = pendingQuestionsById.remove(questionId) ?: return@submit
+            requireOpenCodeClient(pending.serverId).rejectQuestion(pending.requestId)
             updateState { it.copy(connectionError = null) }
         }
     }
@@ -464,6 +537,90 @@ class ServerManager(
         }
     }
 
+    fun selectOpenCodeAgent(
+        name: String?,
+        serverId: String? = null,
+    ) {
+        submit {
+            val resolvedServerId = resolveServerIdForRequestedOperation(serverId)
+            if (serversById[resolvedServerId]?.backendKind != BackendKind.OPENCODE) {
+                return@submit
+            }
+            selectedAgentByServerId[resolvedServerId] = name?.trim()?.takeIf { it.isNotEmpty() }
+            updateState { it }
+        }
+    }
+
+    fun shareActiveThread(onComplete: ((Result<Unit>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { shareActiveThreadInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun unshareActiveThread(onComplete: ((Result<Unit>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { unshareActiveThreadInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun compactActiveThread(onComplete: ((Result<Unit>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { compactActiveThreadInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun undoActiveThread(onComplete: ((Result<Unit>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { undoActiveThreadInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun redoActiveThread(onComplete: ((Result<Unit>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { redoActiveThreadInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun executeOpenCodeCommand(
+        command: String,
+        arguments: String,
+        cwd: String? = null,
+        modelSelection: ModelSelection? = null,
+        onComplete: ((Result<Unit>) -> Unit)? = null,
+    ) {
+        submit {
+            val result = runCatching {
+                val resolvedCwd = resolveMessageCwd(cwd)
+                executeOpenCodeCommandInternal(
+                    command = command,
+                    arguments = arguments,
+                    cwd = resolvedCwd,
+                    modelSelection = modelSelection ?: state.selectedModel,
+                )
+            }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun loadOpenCodeMcpStatus(onComplete: ((Result<List<OpenCodeMcpServer>>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { loadOpenCodeMcpStatusInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
+    fun loadOpenCodeStatus(onComplete: ((Result<OpenCodeStatusSnapshot>) -> Unit)? = null) {
+        submit {
+            val result = runCatching { loadOpenCodeStatusInternal() }
+            deliver(onComplete, result)
+        }
+    }
+
     fun renameActiveThread(
         name: String,
         onComplete: ((Result<Unit>) -> Unit)? = null,
@@ -575,6 +732,10 @@ class ServerManager(
             transportsByServerId.values.forEach { it.close() }
             transportsByServerId.clear()
         }
+        runCatching {
+            openCodeClientsByServerId.values.forEach { it.close() }
+            openCodeClientsByServerId.clear()
+        }
         runCatching { codexRpcClient.stop() }
         runCatching { worker.shutdownNow() }
     }
@@ -586,19 +747,6 @@ class ServerManager(
     }
 
     private fun connectServerInternal(server: ServerConfig): ServerConfig {
-        val existingServer = serversById[server.id]
-        val existingTransport = transportsByServerId[server.id]
-        if (existingServer != null && existingTransport != null) {
-            updateState {
-                it.copy(
-                    activeServerId = server.id,
-                    connectionStatus = ServerConnectionStatus.READY,
-                    connectionError = null,
-                )
-            }
-            return existingServer
-        }
-
         val normalizedServer =
             if (server.source == ServerSource.LOCAL) {
                 // Always resolve the active on-device bridge port instead of trusting discovery defaults.
@@ -607,73 +755,157 @@ class ServerManager(
                 ensureBundledServiceReady()
                 ServerConfig.bundled(BundledCodexService.PORT)
             } else {
-                server.copy(host = normalizeServerHost(server.host))
-            }
-
-        val transport = BridgeRpcTransport(
-            url = websocketUrl(normalizedServer),
-            onNotification = { method, params ->
-                submit {
-                    handleNotification(normalizedServer.id, method, params)
-                }
-            },
-            onServerRequest = { requestId, method, params ->
-                handleServerRequestInternal(
-                    serverId = normalizedServer.id,
-                    requestId = requestId,
-                    method = method,
-                    params = params,
+                server.copy(
+                    host =
+                        normalizeServerHost(
+                            server.host,
+                            preserveScheme = server.backendKind == BackendKind.OPENCODE,
+                        ),
                 )
-            },
-        )
-
-        try {
-            transport.connect(timeoutSeconds = 15)
-            sendInitialize(transport)
-            if (normalizedServer.source == ServerSource.BUNDLED) {
-                restoreBundledAuthIfAvailableInternal(serverId = normalizedServer.id, transport = transport)
             }
-        } catch (error: Throwable) {
-            transport.close()
-            throw error
+        val existingServer = serversById[normalizedServer.id]
+        val isConnected =
+            when (normalizedServer.backendKind) {
+                BackendKind.CODEX -> transportsByServerId[normalizedServer.id] != null
+                BackendKind.OPENCODE -> openCodeClientsByServerId[normalizedServer.id] != null
+            }
+        val reset = existingServer != null && isConnected && !sameServer(existingServer, normalizedServer)
+        if (existingServer != null && isConnected && !reset) {
+            updateState {
+                it.copy(
+                    activeServerId = normalizedServer.id,
+                    connectionStatus = ServerConnectionStatus.READY,
+                    connectionError = null,
+                )
+            }
+            return existingServer
+        }
+        if (reset) {
+            clearServer(normalizedServer.id)
         }
 
-        transportsByServerId[normalizedServer.id]?.close()
-        transportsByServerId[normalizedServer.id] = transport
-        serversById[normalizedServer.id] = normalizedServer
-        accountByServerId.putIfAbsent(normalizedServer.id, AccountState())
+        val connectedServer =
+            when (normalizedServer.backendKind) {
+                BackendKind.CODEX -> {
+                    val transport = BridgeRpcTransport(
+                        url = websocketUrl(normalizedServer),
+                        onNotification = { method, params ->
+                            submit {
+                                handleNotification(normalizedServer.id, method, params)
+                            }
+                        },
+                        onServerRequest = { requestId, method, params ->
+                            handleServerRequestInternal(
+                                serverId = normalizedServer.id,
+                                requestId = requestId,
+                                method = method,
+                                params = params,
+                            )
+                        },
+                    )
+
+                    try {
+                        transport.connect(timeoutSeconds = 15)
+                        sendInitialize(transport)
+                        if (normalizedServer.source == ServerSource.BUNDLED) {
+                            restoreBundledAuthIfAvailableInternal(serverId = normalizedServer.id, transport = transport)
+                        }
+                    } catch (error: Throwable) {
+                        transport.close()
+                        throw error
+                    }
+
+                    transportsByServerId[normalizedServer.id]?.close()
+                    transportsByServerId[normalizedServer.id] = transport
+                    capabilitiesByServerId[normalizedServer.id] =
+                        BackendCapabilities(
+                            supportsAuthManagement = true,
+                            supportsExperimentalFeatures = true,
+                            supportsSkillListing = true,
+                            supportsDirectoryBrowser = true,
+                            supportsQuestions = false,
+                        )
+                    normalizedServer
+                }
+
+                BackendKind.OPENCODE -> {
+                    val initialClient = OpenCodeClient(normalizedServer)
+                    initialClient.connect()
+                    val directory = normalizedServer.directory ?: initialClient.currentDirectory()
+                    initialClient.close()
+                    val scopedServer = normalizedServer.copy(directory = directory)
+                    val client = OpenCodeClient(scopedServer)
+                    client.connect()
+                    client.subscribeEvents { event ->
+                        submit {
+                            handleOpenCodeEvent(scopedServer.id, event)
+                        }
+                    }
+                    openCodeClientsByServerId[scopedServer.id]?.close()
+                    openCodeClientsByServerId[scopedServer.id] = client
+                    capabilitiesByServerId[scopedServer.id] =
+                        BackendCapabilities(
+                            supportsAuthManagement = false,
+                            supportsExperimentalFeatures = false,
+                            supportsSkillListing = true,
+                            supportsDirectoryBrowser = false,
+                            supportsQuestions = true,
+                        )
+                    scopedServer
+                }
+            }
+
+        serversById[connectedServer.id] = connectedServer
+        accountByServerId.putIfAbsent(connectedServer.id, AccountState())
         persistSavedServersInternal()
 
         updateState {
             val preferredCwd =
-                if (normalizedServer.source == ServerSource.BUNDLED) {
-                    preferredDirectoryRootForServer(normalizedServer.id)
+                if (connectedServer.source == ServerSource.BUNDLED) {
+                    preferredDirectoryRootForServer(connectedServer.id)
+                } else if (connectedServer.backendKind == BackendKind.OPENCODE) {
+                    connectedServer.directory ?: it.currentCwd
                 } else {
                     it.currentCwd
                 }
             it.copy(
                 connectionStatus = ServerConnectionStatus.READY,
                 connectionError = null,
-                activeServerId = normalizedServer.id,
+                activeServerId = connectedServer.id,
+                activeThreadKey =
+                    if (reset) {
+                        null
+                    } else {
+                        it.activeThreadKey?.takeIf { key -> key.serverId == connectedServer.id }
+                    },
                 currentCwd = preferredCwd,
             )
         }
 
-        return normalizedServer
+        return connectedServer
     }
 
     private fun disconnectInternal(serverId: String?) {
         if (serverId == null) {
             transportsByServerId.values.forEach { runCatching { it.close() } }
             transportsByServerId.clear()
+            openCodeClientsByServerId.values.forEach { runCatching { it.close() } }
+            openCodeClientsByServerId.clear()
             serversById.clear()
             accountByServerId.clear()
+            capabilitiesByServerId.clear()
+            availableModelsByServerId.clear()
+            selectedModelByServerId.clear()
+            slashByServerId.clear()
+            agentOptionsByServerId.clear()
+            selectedAgentByServerId.clear()
             threadsByKey.clear()
             liveItemMessageIndices.clear()
             liveTurnDiffMessageIndices.clear()
             serversUsingItemNotifications.clear()
             threadTurnCounts.clear()
             pendingApprovalsById.clear()
+            pendingQuestionsById.clear()
             agentDirectory.clear()
             runCatching { codexRpcClient.stop() }
             runCatching { appContext?.stopService(android.content.Intent(appContext, BundledCodexService::class.java)) }
@@ -692,14 +924,22 @@ class ServerManager(
         }
 
         runCatching { transportsByServerId.remove(serverId)?.close() }
+        runCatching { openCodeClientsByServerId.remove(serverId)?.close() }
         val removedServer = serversById.remove(serverId)
         accountByServerId.remove(serverId)
+        capabilitiesByServerId.remove(serverId)
+        availableModelsByServerId.remove(serverId)
+        selectedModelByServerId.remove(serverId)
+        slashByServerId.remove(serverId)
+        agentOptionsByServerId.remove(serverId)
+        selectedAgentByServerId.remove(serverId)
         threadsByKey.entries.removeAll { it.key.serverId == serverId }
         liveItemMessageIndices.keys.removeAll { it.serverId == serverId }
         liveTurnDiffMessageIndices.keys.removeAll { it.serverId == serverId }
         serversUsingItemNotifications.remove(serverId)
         threadTurnCounts.keys.removeAll { it.serverId == serverId }
         pendingApprovalsById.values.removeAll { it.serverId == serverId }
+        pendingQuestionsById.values.removeAll { it.serverId == serverId }
         agentDirectory.removeServer(serverId)
 
         if (removedServer?.source == ServerSource.LOCAL && serversById.values.none { it.source == ServerSource.LOCAL }) {
@@ -739,7 +979,43 @@ class ServerManager(
                 accountByServerId = LinkedHashMap(accountByServerId),
             ),
         )
-        persistSavedServersInternal()
+        persistSavedServersInternal(removedServerIds = setOf(serverId))
+    }
+
+    private fun clearServer(serverId: String): ServerConfig? {
+        runCatching { transportsByServerId.remove(serverId)?.close() }
+        runCatching { openCodeClientsByServerId.remove(serverId)?.close() }
+        val removed = serversById.remove(serverId)
+        accountByServerId.remove(serverId)
+        capabilitiesByServerId.remove(serverId)
+        availableModelsByServerId.remove(serverId)
+        selectedModelByServerId.remove(serverId)
+        slashByServerId.remove(serverId)
+        agentOptionsByServerId.remove(serverId)
+        selectedAgentByServerId.remove(serverId)
+        threadsByKey.entries.removeAll { it.key.serverId == serverId }
+        liveItemMessageIndices.keys.removeAll { it.serverId == serverId }
+        liveTurnDiffMessageIndices.keys.removeAll { it.serverId == serverId }
+        serversUsingItemNotifications.remove(serverId)
+        threadTurnCounts.keys.removeAll { it.serverId == serverId }
+        pendingApprovalsById.values.removeAll { it.serverId == serverId }
+        pendingQuestionsById.values.removeAll { it.serverId == serverId }
+        agentDirectory.removeServer(serverId)
+        return removed
+    }
+
+    private fun sameServer(
+        left: ServerConfig,
+        right: ServerConfig,
+    ): Boolean {
+        return left.host == right.host &&
+            left.port == right.port &&
+            left.source == right.source &&
+            left.backendKind == right.backendKind &&
+            left.hasCodexServer == right.hasCodexServer &&
+            left.username == right.username &&
+            left.password == right.password &&
+            left.directory == right.directory
     }
 
     private fun websocketUrl(server: ServerConfig): String {
@@ -753,18 +1029,49 @@ class ServerManager(
         return "ws://$normalizedHost:${server.port}"
     }
 
-    private fun normalizeServerHost(rawHost: String): String {
+    private fun normalizeServerHost(
+        rawHost: String,
+        preserveScheme: Boolean = false,
+    ): String {
         var host = rawHost.trim()
         if (host.isEmpty()) {
             return "127.0.0.1"
+        }
+
+        if (preserveScheme && host.contains("://")) {
+            return runCatching {
+                val uri = URI(host)
+                val scheme = uri.scheme?.trim()?.lowercase().orEmpty().ifEmpty { "http" }
+                val authority =
+                    uri.rawAuthority?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: uri.host?.trim()
+                        ?: host.substringAfter("://", host).substringBefore('/').trim()
+                val path =
+                    uri.rawPath
+                        ?.trim()
+                        ?.trimEnd('/')
+                        ?.takeIf { it.isNotEmpty() && it != "/" }
+                        .orEmpty()
+                if (authority.isEmpty()) {
+                    host.trimEnd('/')
+                } else {
+                    "$scheme://$authority$path"
+                }
+            }.getOrDefault(host.trimEnd('/'))
         }
 
         if (host.contains("://")) {
             host =
                 runCatching {
                     val parsed = URI(host)
-                    parsed.host?.trim()
-                        ?: parsed.path?.trim()?.trimStart('/')
+                    val parsedHost = parsed.host?.trim()
+                    val port = parsed.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
+                    val authority =
+                        when {
+                            !parsedHost.isNullOrEmpty() -> parsedHost + port
+                            else -> parsed.path?.trim()?.trimStart('/')
+                        }
+                    authority
                         ?: host
                 }.getOrDefault(host)
         }
@@ -799,6 +1106,10 @@ class ServerManager(
             }
 
         for (server in targetServers) {
+            if (server.backendKind == BackendKind.OPENCODE) {
+                refreshOpenCodeSessions(server)
+                continue
+            }
             val transport = requireTransport(server.id)
             val authoritativeKeys = LinkedHashSet<ThreadKey>()
             val missingRemoteCwdKeys = LinkedHashSet<ThreadKey>()
@@ -943,6 +1254,20 @@ class ServerManager(
 
     private fun loadModelsInternal(serverId: String? = null): List<ModelOption> {
         val targetServerId = serverId ?: resolveServerIdForActiveOperations()
+        if (serversById[targetServerId]?.backendKind == BackendKind.OPENCODE) {
+            val parsed = loadOpenCodeModelsInternal(targetServerId)
+            updateState { current ->
+                val selectedModel = chooseModelSelection(selectedModelByServerId[targetServerId] ?: current.selectedModel, parsed)
+                availableModelsByServerId[targetServerId] = parsed
+                selectedModelByServerId[targetServerId] = selectedModel
+                current.copy(
+                    availableModels = parsed,
+                    selectedModel = selectedModel,
+                    activeServerId = targetServerId,
+                )
+            }
+            return parsed
+        }
         val transport = requireTransport(targetServerId)
         val response = transport.request(
             method = "model/list",
@@ -990,7 +1315,9 @@ class ServerManager(
         }
 
         updateState { current ->
-            val selectedModel = chooseModelSelection(current.selectedModel, parsed)
+            val selectedModel = chooseModelSelection(selectedModelByServerId[targetServerId] ?: current.selectedModel, parsed)
+            availableModelsByServerId[targetServerId] = parsed
+            selectedModelByServerId[targetServerId] = selectedModel
             current.copy(
                 availableModels = parsed,
                 selectedModel = selectedModel,
@@ -1001,6 +1328,17 @@ class ServerManager(
     }
 
     private fun refreshAccountStateInternal(serverId: String): AccountState {
+        if (serversById[serverId]?.backendKind == BackendKind.OPENCODE) {
+            val accountState = AccountState(status = AuthStatus.NOT_LOGGED_IN)
+            accountByServerId[serverId] = accountState
+            updateState {
+                it.copy(
+                    accountByServerId = LinkedHashMap(accountByServerId),
+                    activeServerId = serverId,
+                )
+            }
+            return accountState
+        }
         val response =
             requireTransport(serverId).request(
                 method = "account/read",
@@ -1690,10 +2028,15 @@ class ServerManager(
     }
 
     private fun resolveHomeDirectoryInternal(serverId: String? = null): String {
-        if (transportsByServerId.isEmpty()) {
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
             connectLocalDefaultServerInternal()
         }
         val targetServerId = resolveServerIdForRequestedOperation(serverId)
+        val targetServer = ensureConnectedServer(targetServerId)
+        if (targetServer.backendKind == BackendKind.OPENCODE) {
+            return targetServer.directory?.trim()?.ifBlank { null }
+                ?: state.currentCwd.ifBlank { "/" }
+        }
         if (serversById[targetServerId]?.source == ServerSource.BUNDLED) {
             return preferredDirectoryRootForServer(targetServerId)
         }
@@ -1726,10 +2069,14 @@ class ServerManager(
         path: String,
         serverId: String? = null,
     ): List<String> {
-        if (transportsByServerId.isEmpty()) {
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
             connectLocalDefaultServerInternal()
         }
         val targetServerId = resolveServerIdForRequestedOperation(serverId)
+        val targetServer = ensureConnectedServer(targetServerId)
+        if (targetServer.backendKind == BackendKind.OPENCODE) {
+            throw IllegalStateException("Directory browsing is not supported for OpenCode servers")
+        }
         val fallbackRoot = preferredDirectoryRootForServer(targetServerId)
         if (serversById[targetServerId]?.source == ServerSource.BUNDLED) {
             return listLocalDirectoriesInternal(path = path, fallbackRoot = fallbackRoot)
@@ -1780,10 +2127,13 @@ class ServerManager(
         roots: List<String>,
         cancellationToken: String?,
     ): List<FuzzyFileSearchResult> {
-        if (transportsByServerId.isEmpty()) {
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
             connectLocalDefaultServerInternal()
         }
         val serverId = resolveServerIdForActiveOperations()
+        if (ensureConnectedServer(serverId).backendKind == BackendKind.OPENCODE) {
+            throw IllegalStateException("File search is not supported for OpenCode servers")
+        }
         val normalizedRoots =
             roots
                 .map { it.trim() }
@@ -1865,11 +2215,46 @@ class ServerManager(
         modelSelection: ModelSelection?,
         serverId: String? = null,
     ): ThreadKey {
-        if (transportsByServerId.isEmpty()) {
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
             connectLocalDefaultServerInternal()
         }
         val targetServerId = resolveServerIdForRequestedOperation(serverId)
         val server = ensureConnectedServer(targetServerId)
+        if (server.backendKind == BackendKind.OPENCODE) {
+            val created = requireOpenCodeClient(targetServerId).createSession()
+            val threadId = created.optString("id").trim()
+            if (threadId.isEmpty()) {
+                throw IllegalStateException("OpenCode session/create returned no session id")
+            }
+            val key = ThreadKey(server.id, threadId)
+            threadsByKey[key] =
+                ThreadState(
+                    key = key,
+                    serverName = server.name,
+                    serverSource = server.source,
+                    status = ThreadStatus.READY,
+                    messages = emptyList(),
+                    preview = created.optString("title").trim(),
+                    cwd = server.directory ?: cwd,
+                    modelProvider = "",
+                    parentThreadId = created.optString("parentID").trim().ifBlank { null },
+                    rootThreadId = null,
+                    updatedAtEpochMillis = parseOpenCodeUpdatedAt(created),
+                    activeTurnId = null,
+                    lastError = null,
+                )
+            threadTurnCounts[key] = 0
+            updateState {
+                it.copy(
+                    activeThreadKey = key,
+                    activeServerId = server.id,
+                    currentCwd = server.directory ?: cwd,
+                    connectionStatus = ServerConnectionStatus.READY,
+                    connectionError = null,
+                )
+            }
+            return key
+        }
         val model = modelSelection?.modelId ?: state.selectedModel.modelId
         val response = startThreadWithFallback(serverId = targetServerId, cwd = cwd, model = model)
         val threadId =
@@ -1971,12 +2356,41 @@ class ServerManager(
         threadId: String,
         cwd: String,
     ): ThreadKey {
-        if (transportsByServerId.isEmpty()) {
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
             connectLocalDefaultServerInternal()
         }
         val server = ensureConnectedServer(serverId)
         val key = ThreadKey(server.id, threadId)
         val existing = threadsByKey[key]
+        if (server.backendKind == BackendKind.OPENCODE) {
+            val messages = mapOpenCodeMessages(requireOpenCodeClient(serverId).loadMessages(threadId))
+            val now = System.currentTimeMillis()
+            threadsByKey[key] =
+                ThreadState(
+                    key = key,
+                    serverName = server.name,
+                    serverSource = server.source,
+                    status = ThreadStatus.READY,
+                    messages = messages,
+                    preview = derivePreview(messages, existing?.preview),
+                    cwd = server.directory ?: cwd,
+                    modelProvider = existing?.modelProvider.orEmpty(),
+                    parentThreadId = existing?.parentThreadId,
+                    rootThreadId = existing?.rootThreadId,
+                    updatedAtEpochMillis = now,
+                    activeTurnId = null,
+                    lastError = null,
+                )
+            threadTurnCounts[key] = inferredTurnCountFromMessages(messages)
+            updateState {
+                it.copy(
+                    activeThreadKey = key,
+                    activeServerId = server.id,
+                    currentCwd = server.directory ?: cwd,
+                )
+            }
+            return key
+        }
         threadsByKey[key] =
             ThreadState(
                 key = key,
@@ -2100,6 +2514,9 @@ class ServerManager(
 
     private fun startReviewOnActiveThreadInternal() {
         val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        if (serversById[key.serverId]?.backendKind == BackendKind.OPENCODE) {
+            throw IllegalStateException("Review is not supported for OpenCode servers")
+        }
         requireTransport(key.serverId).request(
             method = "review/start",
             params = JSONObject()
@@ -2107,6 +2524,149 @@ class ServerManager(
                 .put("target", JSONObject().put("type", "uncommittedChanges"))
                 .put("delivery", "inline"),
         )
+    }
+
+    private fun shareActiveThreadInternal() {
+        val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Share is only supported for OpenCode servers")
+        }
+        requireOpenCodeClient(key.serverId).shareSession(key.threadId)
+        refreshSessionsInternal(key.serverId)
+    }
+
+    private fun unshareActiveThreadInternal() {
+        val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Unshare is only supported for OpenCode servers")
+        }
+        requireOpenCodeClient(key.serverId).unshareSession(key.threadId)
+        refreshSessionsInternal(key.serverId)
+    }
+
+    private fun compactActiveThreadInternal() {
+        val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Compact is only supported for OpenCode servers")
+        }
+        val model = parseOpenCodeModel(state.selectedModel.modelId)
+            ?: throw IllegalStateException("Select an OpenCode model before compacting the session")
+        requireOpenCodeClient(key.serverId).summarizeSession(
+            sessionId = key.threadId,
+            providerId = model.first,
+            modelId = model.second,
+        )
+        refreshSessionsInternal(key.serverId)
+    }
+
+    private fun undoActiveThreadInternal() {
+        val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Undo is only supported for OpenCode servers")
+        }
+        val messages = requireOpenCodeClient(key.serverId).loadMessages(key.threadId)
+        var targetId: String? = null
+        for (index in messages.length() - 1 downTo 0) {
+            val item = messages.optJSONObject(index) ?: continue
+            val info = item.optJSONObject("info") ?: continue
+            if (info.optString("role").trim() != "user") {
+                continue
+            }
+            targetId = info.optString("id").trim().ifEmpty { null }
+            if (targetId != null) {
+                break
+            }
+        }
+        val messageId = targetId ?: throw IllegalStateException("No user message available to undo")
+        requireOpenCodeClient(key.serverId).revertSession(key.threadId, messageId)
+        val existing = threadsByKey[key]
+        if (existing != null) {
+            threadsByKey[key] =
+                existing.copy(
+                    status = ThreadStatus.READY,
+                    activeTurnId = null,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                )
+        }
+        syncActiveThreadFromServerInternal()
+    }
+
+    private fun redoActiveThreadInternal() {
+        val key = state.activeThreadKey ?: throw IllegalStateException("No active thread")
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Redo is only supported for OpenCode servers")
+        }
+        requireOpenCodeClient(key.serverId).unrevertSession(key.threadId)
+        syncActiveThreadFromServerInternal()
+    }
+
+    private fun executeOpenCodeCommandInternal(
+        command: String,
+        arguments: String,
+        cwd: String,
+        modelSelection: ModelSelection,
+    ) {
+        if (openCodeClientsByServerId.isEmpty() && transportsByServerId.isEmpty()) {
+            connectLocalDefaultServerInternal()
+        }
+        val key = state.activeThreadKey ?: startThreadInternal(cwd, modelSelection)
+        val server = ensureConnectedServer(key.serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("OpenCode slash commands require an OpenCode server")
+        }
+        val cleanCommand = command.trim().removePrefix("/")
+        if (cleanCommand.isEmpty()) {
+            throw IllegalArgumentException("Command name is required")
+        }
+        val cleanArguments = arguments.trim()
+        val preview = buildString {
+            append('/')
+            append(cleanCommand)
+            if (cleanArguments.isNotEmpty()) {
+                append(' ')
+                append(cleanArguments)
+            }
+        }
+        val existing = threadsByKey[key] ?: throw IllegalStateException("Unable to resolve active thread")
+        threadsByKey[key] =
+            existing.copy(
+                status = ThreadStatus.THINKING,
+                messages = existing.messages + ChatMessage(role = MessageRole.USER, text = preview, isFromUserTurnBoundary = true),
+                preview = preview.take(120),
+                cwd = cwd,
+                updatedAtEpochMillis = System.currentTimeMillis(),
+                lastError = null,
+            )
+        updateState { it.copy(activeThreadKey = key, activeServerId = key.serverId, currentCwd = cwd, connectionError = null) }
+        val model = modelSelection.modelId ?: state.selectedModel.modelId
+        val agent = selectedAgentByServerId[key.serverId]?.trim()?.takeIf { it.isNotEmpty() }
+        try {
+            requireOpenCodeClient(key.serverId).executeCommand(
+                sessionId = key.threadId,
+                command = cleanCommand,
+                arguments = cleanArguments,
+                model = model,
+                agent = agent,
+            )
+            refreshOpenCodeInteractions(key.serverId)
+        } catch (error: Throwable) {
+            val latest = threadsByKey[key]
+            if (latest != null) {
+                threadsByKey[key] =
+                    latest.copy(
+                        status = ThreadStatus.ERROR,
+                        lastError = error.message ?: "Failed to run slash command",
+                        updatedAtEpochMillis = System.currentTimeMillis(),
+                    )
+            }
+            updateState { it.copy(connectionError = error.message ?: "Failed to run slash command") }
+            throw error
+        }
     }
 
     private fun renameActiveThreadInternal(name: String) {
@@ -2126,10 +2686,14 @@ class ServerManager(
         if (trimmed.isEmpty()) {
             throw IllegalArgumentException("Thread name is required")
         }
-        requireTransport(key.serverId).request(
-            method = "thread/name/set",
-            params = JSONObject().put("threadId", key.threadId).put("name", trimmed),
-        )
+        if (serversById[key.serverId]?.backendKind == BackendKind.OPENCODE) {
+            requireOpenCodeClient(key.serverId).renameSession(key.threadId, trimmed)
+        } else {
+            requireTransport(key.serverId).request(
+                method = "thread/name/set",
+                params = JSONObject().put("threadId", key.threadId).put("name", trimmed),
+            )
+        }
 
         val existing = threadsByKey[key] ?: return
         threadsByKey[key] =
@@ -2200,6 +2764,40 @@ class ServerManager(
         sourceThread: ThreadState,
     ): ThreadKey {
         val server = ensureConnectedServer(sourceKey.serverId)
+        if (server.backendKind == BackendKind.OPENCODE) {
+            val forked = requireOpenCodeClient(server.id).forkSession(sourceKey.threadId)
+            val forkedThreadId = forked.optString("id").trim()
+            if (forkedThreadId.isEmpty()) {
+                throw IllegalStateException("OpenCode session/fork returned no session id")
+            }
+            val forkedKey = ThreadKey(server.id, forkedThreadId)
+            threadsByKey[forkedKey] =
+                ThreadState(
+                    key = forkedKey,
+                    serverName = server.name,
+                    serverSource = server.source,
+                    status = ThreadStatus.READY,
+                    messages = emptyList(),
+                    preview = forked.optString("title").trim().ifBlank { sourceThread.preview },
+                    cwd = server.directory ?: sourceThread.cwd,
+                    modelProvider = sourceThread.modelProvider,
+                    parentThreadId = forked.optString("parentID").trim().ifBlank { sourceKey.threadId },
+                    rootThreadId = sourceThread.rootThreadId ?: sourceThread.parentThreadId ?: sourceKey.threadId,
+                    updatedAtEpochMillis = parseOpenCodeUpdatedAt(forked),
+                    activeTurnId = null,
+                    lastError = null,
+                )
+            threadTurnCounts[forkedKey] = 0
+            updateState {
+                it.copy(
+                    activeThreadKey = forkedKey,
+                    activeServerId = server.id,
+                    currentCwd = server.directory ?: sourceThread.cwd,
+                    connectionError = null,
+                )
+            }
+            return forkedKey
+        }
         val sourceCwd = sourceThread.cwd.ifBlank { defaultWorkingDirectory() }
         val response = forkThreadWithFallback(server.id, sourceKey.threadId, sourceCwd)
         val threadObj = response.optJSONObject("thread") ?: JSONObject()
@@ -2263,10 +2861,14 @@ class ServerManager(
     }
 
     private fun archiveThreadInternal(threadKey: ThreadKey) {
-        requireTransport(threadKey.serverId).request(
-            method = "thread/archive",
-            params = JSONObject().put("threadId", threadKey.threadId),
-        )
+        if (serversById[threadKey.serverId]?.backendKind == BackendKind.OPENCODE) {
+            requireOpenCodeClient(threadKey.serverId).archiveSession(threadKey.threadId, archived = true)
+        } else {
+            requireTransport(threadKey.serverId).request(
+                method = "thread/archive",
+                params = JSONObject().put("threadId", threadKey.threadId),
+            )
+        }
         threadsByKey.remove(threadKey)
         threadTurnCounts.remove(threadKey)
         liveItemMessageIndices.remove(threadKey)
@@ -2395,6 +2997,9 @@ class ServerManager(
 
     private fun listExperimentalFeaturesInternal(limit: Int): List<ExperimentalFeature> {
         val serverId = resolveServerIdForActiveOperations()
+        if (serversById[serverId]?.backendKind == BackendKind.OPENCODE) {
+            throw IllegalStateException("Experimental features are not supported for OpenCode servers")
+        }
         val response =
             requireTransport(serverId).request(
                 method = "experimentalFeature/list",
@@ -2439,6 +3044,9 @@ class ServerManager(
             throw IllegalArgumentException("Feature name is required")
         }
         val serverId = resolveServerIdForActiveOperations()
+        if (serversById[serverId]?.backendKind == BackendKind.OPENCODE) {
+            throw IllegalStateException("Experimental features are not supported for OpenCode servers")
+        }
         requireTransport(serverId).request(
             method = "config/value/write",
             params =
@@ -2456,6 +3064,27 @@ class ServerManager(
         forceReload: Boolean,
     ): List<SkillMetadata> {
         val serverId = resolveServerIdForActiveOperations()
+        if (serversById[serverId]?.backendKind == BackendKind.OPENCODE) {
+            val items = requireOpenCodeClient(serverId).listSkills()
+            val parsed = ArrayList<SkillMetadata>(items.length())
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                val name = item.optString("name").trim()
+                val path = item.optString("location").trim()
+                if (name.isEmpty() || path.isEmpty()) {
+                    continue
+                }
+                parsed +=
+                    SkillMetadata(
+                        name = name,
+                        description = item.optString("description").trim(),
+                        path = path,
+                        scope = "opencode",
+                        enabled = true,
+                    )
+            }
+            return parsed
+        }
         val params = JSONObject().put("forceReload", forceReload)
         val normalizedCwds =
             cwds
@@ -2510,15 +3139,6 @@ class ServerManager(
             return
         }
 
-        if (transportsByServerId.isEmpty()) {
-            connectLocalDefaultServerInternal()
-        }
-
-        val key = state.activeThreadKey ?: startThreadInternal(cwd, modelSelection)
-        val serverId = key.serverId
-        ensureAuthenticatedForTurns(serverId)
-        val existing = threadsByKey[key] ?: throw IllegalStateException("Unable to resolve active thread")
-        val now = System.currentTimeMillis()
         val localImageName = normalizedLocalImagePath?.let { File(it).name }.orEmpty()
         val userVisibleText =
             when {
@@ -2531,6 +3151,26 @@ class ServerManager(
 
                 else -> ""
             }
+
+        if (transportsByServerId.isEmpty() && openCodeClientsByServerId.isEmpty()) {
+            connectLocalDefaultServerInternal()
+        }
+
+        val key = state.activeThreadKey ?: startThreadInternal(cwd, modelSelection)
+        val serverId = key.serverId
+        if (serversById[serverId]?.backendKind == BackendKind.OPENCODE) {
+            sendOpenCodeMessageInternal(
+                key = key,
+                text = trimmed,
+                cwd = cwd,
+                userVisibleText = userVisibleText,
+                modelSelection = modelSelection,
+            )
+            return
+        }
+        ensureAuthenticatedForTurns(serverId)
+        val existing = threadsByKey[key] ?: throw IllegalStateException("Unable to resolve active thread")
+        val now = System.currentTimeMillis()
 
         val withUserMessage =
             existing.copy(
@@ -2702,6 +3342,19 @@ class ServerManager(
 
     private fun interruptInternal() {
         val key = state.activeThreadKey ?: return
+        if (serversById[key.serverId]?.backendKind == BackendKind.OPENCODE) {
+            requireOpenCodeClient(key.serverId).abort(key.threadId)
+            val existing = threadsByKey[key] ?: return
+            threadsByKey[key] =
+                existing.copy(
+                    status = ThreadStatus.READY,
+                    activeTurnId = null,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    messages = finalizeStreaming(existing.messages),
+                )
+            updateState { it }
+            return
+        }
         val activeTurnId = threadsByKey[key]?.activeTurnId?.trim().takeIf { !it.isNullOrEmpty() }
         val params =
             JSONObject()
@@ -3832,6 +4485,77 @@ class ServerManager(
         ).orEmpty()
     }
 
+    private fun parseOpenCodeModel(value: String?): Pair<String, String>? {
+        val model = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val providerId = model.substringBefore('/').trim()
+        val modelId = model.substringAfter('/', "").trim()
+        if (providerId.isEmpty() || modelId.isEmpty()) {
+            return null
+        }
+        return providerId to modelId
+    }
+
+    private fun openCodePromptModel(value: String?): JSONObject? {
+        val model = parseOpenCodeModel(value) ?: return null
+        return JSONObject()
+            .put("providerID", model.first)
+            .put("modelID", model.second)
+    }
+
+    private fun JSONArray.jsonStrings(): List<String> {
+        val values = ArrayList<String>(length())
+        for (index in 0 until length()) {
+            val value = optString(index).trim()
+            if (value.isNotEmpty()) {
+                values += value
+            }
+        }
+        return values
+    }
+
+    private fun summarizeJson(value: Any?): String {
+        return when (value) {
+            null, JSONObject.NULL -> ""
+            is JSONObject -> {
+                val lines = jsonLines(value)
+                if (lines.isEmpty()) "" else lines.joinToString(" • ")
+            }
+            is JSONArray -> {
+                val lines = jsonLines(value)
+                if (lines.isEmpty()) "" else lines.joinToString(" • ")
+            }
+            else -> value.toString().trim()
+        }
+    }
+
+    private fun jsonLines(value: Any?): List<String> {
+        return when (value) {
+            null, JSONObject.NULL -> emptyList()
+            is JSONObject -> {
+                val keys = value.keys()
+                val lines = ArrayList<String>()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val item = value.opt(key)
+                    val summary = summarizeJson(item)
+                    lines += if (summary.isNotEmpty()) "$key: $summary" else key
+                }
+                lines
+            }
+            is JSONArray -> {
+                val lines = ArrayList<String>(value.length())
+                for (index in 0 until value.length()) {
+                    val summary = summarizeJson(value.opt(index))
+                    if (summary.isNotEmpty()) {
+                        lines += summary
+                    }
+                }
+                lines
+            }
+            else -> listOf(value.toString())
+        }
+    }
+
     private fun normalizeCwd(cwd: String?): String? = cwd?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun parseThreadCwd(obj: JSONObject?): String? {
@@ -4427,6 +5151,23 @@ class ServerManager(
         val thread = threadsByKey[key] ?: return false
         if (thread.hasTurnActive) {
             return false
+        }
+        if (serversById[key.serverId]?.backendKind == BackendKind.OPENCODE) {
+            val restoredMessages = mapOpenCodeMessages(requireOpenCodeClient(key.serverId).loadMessages(key.threadId))
+            if (messagesEquivalent(thread.messages, restoredMessages)) {
+                return false
+            }
+            threadsByKey[key] =
+                thread.copy(
+                    status = thread.status,
+                    activeTurnId = null,
+                    messages = restoredMessages,
+                    preview = derivePreview(restoredMessages, thread.preview),
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    lastError = null,
+                )
+            threadTurnCounts[key] = inferredTurnCountFromMessages(restoredMessages)
+            return true
         }
 
         val cwd = thread.cwd.ifBlank { defaultWorkingDirectory() }
@@ -5285,6 +6026,431 @@ class ServerManager(
         }
     }
 
+    private fun handleOpenCodeEvent(
+        serverId: String,
+        event: JSONObject,
+    ) {
+        val payload = event.optJSONObject("payload") ?: event
+        val type = payload.optString("type")
+        if (type == "server.connected" || type == "server.heartbeat") {
+            return
+        }
+        if (type == "session.status") {
+            val props = payload.optJSONObject("properties")
+            val threadId = props?.optString("sessionID")?.trim().orEmpty()
+            val status = props?.optJSONObject("status")
+            if (threadId.isNotEmpty()) {
+                val key = ThreadKey(serverId, threadId)
+                val thread = threadsByKey[key]
+                if (thread != null) {
+                    threadsByKey[key] =
+                        thread.copy(
+                            status = mapOpenCodeThreadStatus(status),
+                            updatedAtEpochMillis = System.currentTimeMillis(),
+                        )
+                    updateState { it }
+                }
+            }
+        }
+        refreshSessionsInternal(serverId)
+        syncActiveThreadFromServerInternal()
+    }
+
+    private fun refreshOpenCodeSessions(server: ServerConfig) {
+        val client = requireOpenCodeClient(server.id)
+        val sessions = client.listSessions()
+        val statuses = client.listStatuses()
+        val authoritativeKeys = LinkedHashSet<ThreadKey>()
+        for (index in 0 until sessions.length()) {
+            val item = sessions.optJSONObject(index) ?: continue
+            val threadId = item.optString("id").trim()
+            if (threadId.isEmpty()) continue
+            val key = ThreadKey(server.id, threadId)
+            authoritativeKeys += key
+            val existing = threadsByKey[key]
+            threadsByKey[key] =
+                ThreadState(
+                    key = key,
+                    serverName = server.name,
+                    serverSource = server.source,
+                    status = mapOpenCodeThreadStatus(statuses.optJSONObject(threadId)),
+                    messages = existing?.messages ?: emptyList(),
+                    preview = item.optString("title").trim().ifBlank { existing?.preview.orEmpty() },
+                    cwd = server.directory ?: existing?.cwd.orEmpty(),
+                    modelProvider = existing?.modelProvider.orEmpty(),
+                    parentThreadId = item.optString("parentID").trim().ifBlank { null },
+                    rootThreadId = existing?.rootThreadId,
+                    updatedAtEpochMillis = parseOpenCodeUpdatedAt(item),
+                    activeTurnId = null,
+                    lastError = null,
+                )
+        }
+        refreshOpenCodeMetadataInternal(server.id)
+        refreshOpenCodeInteractions(server.id)
+        computePlaceholderKeysToPrune(server.id, authoritativeKeys, state.activeThreadKey, threadsByKey).forEach { key ->
+            threadsByKey.remove(key)
+        }
+    }
+
+    private fun refreshOpenCodeInteractions(serverId: String) {
+        val client = requireOpenCodeClient(serverId)
+        pendingApprovalsById.entries.removeAll { it.value.serverId == serverId }
+        pendingQuestionsById.entries.removeAll { it.value.serverId == serverId }
+
+        val permissions = client.listPermissions()
+        for (index in 0 until permissions.length()) {
+            val item = permissions.optJSONObject(index) ?: continue
+            val requestId = item.optString("id").trim()
+            if (requestId.isEmpty()) continue
+            pendingApprovalsById[requestId] =
+                PendingApproval(
+                    id = requestId,
+                    requestId = requestId,
+                    serverId = serverId,
+                    method = "permission.reply",
+                    kind = ApprovalKind.COMMAND_EXECUTION,
+                    threadId = item.optString("sessionID").trim().ifBlank { null },
+                    turnId = null,
+                    itemId = item.optJSONObject("tool")?.optString("callID")?.trim(),
+                    command = item.optJSONArray("patterns")?.join(" ")?.trim(),
+                    cwd = null,
+                    reason = item.optString("permission").trim().ifBlank { "Permission requested" },
+                    grantRoot = null,
+                )
+        }
+
+        val questions = client.listQuestions()
+        for (index in 0 until questions.length()) {
+            val item = questions.optJSONObject(index) ?: continue
+            val requestId = item.optString("id").trim()
+            if (requestId.isEmpty()) continue
+            val prompts = ArrayList<PendingQuestionPrompt>()
+            val questionItems = item.optJSONArray("questions") ?: JSONArray()
+            for (questionIndex in 0 until questionItems.length()) {
+                val prompt = questionItems.optJSONObject(questionIndex) ?: continue
+                val options = ArrayList<PendingQuestionOption>()
+                val optionItems = prompt.optJSONArray("options") ?: JSONArray()
+                for (optionIndex in 0 until optionItems.length()) {
+                    val option = optionItems.optJSONObject(optionIndex) ?: continue
+                    options += PendingQuestionOption(label = option.optString("label"), description = option.optString("description"))
+                }
+                prompts +=
+                    PendingQuestionPrompt(
+                        header = prompt.optString("header"),
+                        question = prompt.optString("question"),
+                        options = options,
+                        multiple = prompt.optBoolean("multiple", false),
+                        custom = !prompt.has("custom") || prompt.optBoolean("custom", true),
+                    )
+            }
+            pendingQuestionsById[requestId] =
+                PendingQuestion(
+                    id = requestId,
+                    requestId = requestId,
+                    serverId = serverId,
+                    threadId = item.optString("sessionID").trim().ifBlank { null },
+                    prompts = prompts,
+                )
+        }
+    }
+
+    private fun refreshOpenCodeMetadataInternal(serverId: String) {
+        val server = serversById[serverId] ?: return
+        if (server.backendKind != BackendKind.OPENCODE) {
+            return
+        }
+        slashByServerId[serverId] = loadOpenCodeSlashEntriesInternal(serverId)
+        val agents = loadOpenCodeAgentOptionsInternal(serverId)
+        agentOptionsByServerId[serverId] = agents
+        val selected = selectedAgentByServerId[serverId]?.trim()?.takeIf { it.isNotEmpty() }
+        if (selected != null && agents.none { it.name == selected && !it.hidden }) {
+            selectedAgentByServerId[serverId] = null
+        }
+    }
+
+    private fun loadOpenCodeSlashEntriesInternal(serverId: String): List<SlashEntry> {
+        val items = requireOpenCodeClient(serverId).listSlashes()
+        val parsed = ArrayList<SlashEntry>(items.length())
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            val id = item.optString("id").trim()
+            val name = item.optString("name").trim()
+            if (id.isEmpty() || name.isEmpty()) {
+                continue
+            }
+            val rawKind = item.optString("kind").trim().lowercase(Locale.ROOT)
+            val kind =
+                if (rawKind == "action") {
+                    SlashKind.ACTION
+                } else if (rawKind == "command") {
+                    SlashKind.COMMAND
+                } else {
+                    continue
+                }
+            parsed +=
+                SlashEntry(
+                    id = id,
+                    kind = kind,
+                    name = name,
+                    aliases = item.optJSONArray("aliases")?.jsonStrings().orEmpty(),
+                    description = item.optString("description").trim(),
+                    category = item.optString("category").trim(),
+                    displayName = item.optString("displayName").trim().ifBlank { "/$name" },
+                    actionId = item.optString("actionID").trim().ifBlank { null },
+                    source = item.optString("source").trim().ifBlank { null },
+                )
+        }
+        return mergeOpenCodeSlashEntries(parsed)
+    }
+
+    private fun loadOpenCodeAgentOptionsInternal(serverId: String): List<OpenCodeAgentOption> {
+        val items = requireOpenCodeClient(serverId).listAgents()
+        val parsed = ArrayList<OpenCodeAgentOption>(items.length())
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            val name = item.optString("name").trim()
+            if (name.isEmpty()) {
+                continue
+            }
+            parsed +=
+                OpenCodeAgentOption(
+                    name = name,
+                    description = item.optString("description").trim(),
+                    mode = item.optString("mode").trim(),
+                    hidden = item.optBoolean("hidden", false),
+                )
+        }
+        return parsed
+            .filterNot { it.hidden }
+            .sortedBy { it.name.lowercase(Locale.ROOT) }
+    }
+
+    private fun loadOpenCodeModelsInternal(serverId: String): List<ModelOption> {
+        val client = requireOpenCodeClient(serverId)
+        val config = runCatching { client.listConfigProviders() }.getOrNull()
+        val providers = config?.optJSONArray("providers")
+        if (providers != null && providers.length() > 0) {
+            return parseOpenCodeModels(
+                providers = providers,
+                defaults = config.optJSONObject("default") ?: JSONObject(),
+            )
+        }
+        val fallback = client.listProviders()
+        return parseOpenCodeModels(
+            providers = fallback.optJSONArray("all") ?: JSONArray(),
+            defaults = fallback.optJSONObject("default") ?: JSONObject(),
+        )
+    }
+
+    private fun parseOpenCodeModels(
+        providers: JSONArray,
+        defaults: JSONObject,
+    ): List<ModelOption> {
+        val parsed = ArrayList<ModelOption>()
+        for (providerIndex in 0 until providers.length()) {
+            val provider = providers.optJSONObject(providerIndex) ?: continue
+            val providerId = provider.optString("id").trim()
+            if (providerId.isEmpty()) {
+                continue
+            }
+            val providerName = provider.optString("name").trim().ifBlank { providerId }
+            val models = provider.optJSONObject("models") ?: continue
+            val defaultModel = defaults.optString(providerId).trim()
+            val keys = models.keys()
+            while (keys.hasNext()) {
+                val modelId = keys.next().trim()
+                if (modelId.isEmpty()) {
+                    continue
+                }
+                val info = models.optJSONObject(modelId) ?: JSONObject()
+                val displayName = info.optString("name").trim().ifBlank { modelId }
+                val description =
+                    buildString {
+                        append(providerName)
+                        val family = info.optString("family").trim()
+                        if (family.isNotEmpty()) {
+                            append(" • ")
+                            append(family)
+                        }
+                    }
+                parsed +=
+                    ModelOption(
+                        id = "$providerId/$modelId",
+                        displayName = displayName,
+                        description = description,
+                        defaultReasoningEffort = null,
+                        supportedReasoningEfforts = emptyList(),
+                        isDefault = modelId == defaultModel,
+                    )
+            }
+        }
+        return parsed.sortedWith(compareByDescending<ModelOption> { it.isDefault }.thenBy { it.id.lowercase(Locale.ROOT) })
+    }
+
+    private fun loadOpenCodeMcpStatusInternal(): List<OpenCodeMcpServer> {
+        val serverId = resolveServerIdForActiveOperations()
+        val server = ensureConnectedServer(serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("MCP status is only available for OpenCode servers")
+        }
+        val items = requireOpenCodeClient(serverId).listMcpStatus()
+        val parsed = ArrayList<OpenCodeMcpServer>()
+        val keys = items.keys()
+        while (keys.hasNext()) {
+            val name = keys.next()
+            val value = items.optJSONObject(name) ?: JSONObject()
+            parsed +=
+                OpenCodeMcpServer(
+                    name = name,
+                    status = extractString(value, "status", "state", "connection").orEmpty().ifBlank { "unknown" },
+                    summary = summarizeJson(value),
+                )
+        }
+        return parsed.sortedBy { it.name.lowercase(Locale.ROOT) }
+    }
+
+    private fun loadOpenCodeStatusInternal(): OpenCodeStatusSnapshot {
+        val serverId = resolveServerIdForActiveOperations()
+        val server = ensureConnectedServer(serverId)
+        if (server.backendKind != BackendKind.OPENCODE) {
+            throw IllegalStateException("Status is only available for OpenCode servers")
+        }
+        val client = requireOpenCodeClient(serverId)
+        val path = client.pathInfo()
+        val vcs = client.vcsInfo()
+        val mcp = client.listMcpStatus()
+        val lsp = client.lspStatus()
+        val formatter = client.formatterStatus()
+        return OpenCodeStatusSnapshot(
+            sections =
+                listOf(
+                    OpenCodeStatusSection(
+                        title = "Paths",
+                        lines =
+                            listOfNotNull(
+                                path.optString("directory").trim().takeIf { it.isNotEmpty() }?.let { "Directory: $it" },
+                                path.optString("worktree").trim().takeIf { it.isNotEmpty() }?.let { "Worktree: $it" },
+                                path.optString("config").trim().takeIf { it.isNotEmpty() }?.let { "Config: $it" },
+                            ),
+                    ),
+                    OpenCodeStatusSection(
+                        title = "VCS",
+                        lines = jsonLines(vcs),
+                    ),
+                    OpenCodeStatusSection(
+                        title = "MCP",
+                        lines = jsonLines(mcp),
+                    ),
+                    OpenCodeStatusSection(
+                        title = "LSP",
+                        lines = jsonLines(lsp),
+                    ),
+                    OpenCodeStatusSection(
+                        title = "Formatter",
+                        lines = jsonLines(formatter),
+                    ),
+                ).filter { it.lines.isNotEmpty() },
+        )
+    }
+
+    private fun mapOpenCodeMessages(messages: JSONArray): List<ChatMessage> {
+        val parsed = mutableListOf<ChatMessage>()
+        var turnIndex = 0
+        for (index in 0 until messages.length()) {
+            val item = messages.optJSONObject(index) ?: continue
+            val info = item.optJSONObject("info") ?: continue
+            val messageId = info.optString("id").trim().ifBlank { UUID.randomUUID().toString() }
+            val createdAt = info.optJSONObject("time")?.optLong("created") ?: System.currentTimeMillis()
+            val role = info.optString("role")
+            val parts = item.optJSONArray("parts") ?: JSONArray()
+            if (role == "user") {
+                val text = buildString {
+                    for (partIndex in 0 until parts.length()) {
+                        val part = parts.optJSONObject(partIndex) ?: continue
+                        when (part.optString("type")) {
+                            "text" -> appendLine(part.optString("text"))
+                            "file" -> appendLine("[Attachment] ${part.optString("filename").ifBlank { part.optString("mime") }}")
+                        }
+                    }
+                }.trim()
+                parsed += ChatMessage(id = messageId, role = MessageRole.USER, text = text, timestampEpochMillis = createdAt, isFromUserTurnBoundary = true, sourceTurnIndex = turnIndex)
+                turnIndex += 1
+                continue
+            }
+            val text = StringBuilder()
+            val reasoning = StringBuilder()
+            for (partIndex in 0 until parts.length()) {
+                val part = parts.optJSONObject(partIndex) ?: continue
+                when (part.optString("type")) {
+                    "text" -> text.append(part.optString("text"))
+                    "reasoning" -> reasoning.append(part.optString("text"))
+                    "file" -> {
+                        if (text.isNotEmpty()) {
+                            text.append('\n')
+                        }
+                        text.append("[Attachment] ").append(part.optString("filename").ifBlank { part.optString("mime") })
+                    }
+                    "tool" -> {
+                        if (text.isNotEmpty()) {
+                            text.append('\n')
+                        }
+                        text.append("[").append(part.optString("tool")).append(": ").append(part.optJSONObject("state")?.optString("status")).append("]")
+                    }
+                    "step-start", "step-finish" -> Unit
+                    else -> Unit
+                }
+            }
+            if (reasoning.isNotBlank()) {
+                parsed += ChatMessage(id = "$messageId-reasoning", role = MessageRole.REASONING, text = reasoning.toString().trim(), timestampEpochMillis = createdAt, sourceTurnIndex = maxOf(turnIndex - 1, 0))
+            }
+            val fallbackError = info.optJSONObject("error")?.optString("message").orEmpty()
+            val assistantText = text.toString().trim().ifBlank { fallbackError }
+            if (assistantText.isNotBlank()) {
+                parsed += ChatMessage(id = messageId, role = MessageRole.ASSISTANT, text = assistantText, timestampEpochMillis = createdAt, sourceTurnIndex = maxOf(turnIndex - 1, 0))
+            }
+        }
+        return parsed
+    }
+
+    private fun sendOpenCodeMessageInternal(
+        key: ThreadKey,
+        text: String,
+        cwd: String,
+        userVisibleText: String,
+        modelSelection: ModelSelection,
+    ) {
+        val existing = threadsByKey[key] ?: throw IllegalStateException("Unable to resolve active thread")
+        threadsByKey[key] =
+            existing.copy(
+                status = ThreadStatus.THINKING,
+                messages = existing.messages + ChatMessage(role = MessageRole.USER, text = userVisibleText, isFromUserTurnBoundary = true),
+                preview = userVisibleText.take(120),
+                cwd = cwd,
+                updatedAtEpochMillis = System.currentTimeMillis(),
+                lastError = null,
+            )
+        updateState { it.copy(activeThreadKey = key, activeServerId = key.serverId, currentCwd = cwd, connectionError = null) }
+        val model = openCodePromptModel(modelSelection.modelId ?: state.selectedModel.modelId)
+        val agent = selectedAgentByServerId[key.serverId]?.trim()?.takeIf { it.isNotEmpty() }
+        requireOpenCodeClient(key.serverId).sendPrompt(key.threadId, text, model = model, agent = agent)
+        refreshOpenCodeInteractions(key.serverId)
+    }
+
+    private fun parseOpenCodeUpdatedAt(item: JSONObject): Long {
+        val time = item.optJSONObject("time")
+        return time?.optLong("updated")
+            ?: time?.optLong("created")
+            ?: System.currentTimeMillis()
+    }
+
+    private fun mapOpenCodeThreadStatus(status: JSONObject?): ThreadStatus {
+        return when (status?.optString("type")?.lowercase(Locale.ROOT)) {
+            "busy", "running", "pending" -> ThreadStatus.THINKING
+            "error", "failed" -> ThreadStatus.ERROR
+            else -> ThreadStatus.READY
+        }
+    }
+
     private fun shouldRetryWithoutLinuxSandbox(error: Throwable): Boolean {
         val lower = error.message?.lowercase().orEmpty()
         return lower.contains("codex-linux-sandbox was required but not provided") ||
@@ -5435,6 +6601,10 @@ class ServerManager(
         transportsByServerId[serverId]
             ?: throw IllegalStateException("Codex bridge transport is not connected for server '$serverId'")
 
+    private fun requireOpenCodeClient(serverId: String): OpenCodeClient =
+        openCodeClientsByServerId[serverId]
+            ?: throw IllegalStateException("OpenCode client is not connected for server '$serverId'")
+
     private fun ensureConnectedServer(serverId: String): ServerConfig =
         serversById[serverId] ?: throw IllegalStateException("No connected server '$serverId'")
 
@@ -5512,16 +6682,19 @@ class ServerManager(
 
     private fun commitState(base: AppState) {
         val sortedThreads = threadsByKey.values.sortedByDescending { it.updatedAtEpochMillis }
+        val preferredServerId =
+            base.activeServerId?.takeIf { serversById.containsKey(it) }
         val activeKey =
             when {
                 base.activeThreadKey != null && threadsByKey.containsKey(base.activeThreadKey) -> base.activeThreadKey
+                preferredServerId != null -> sortedThreads.firstOrNull { it.key.serverId == preferredServerId }?.key
                 sortedThreads.isNotEmpty() -> sortedThreads.first().key
                 else -> null
             }
         val activeServerId =
             when {
-                base.activeServerId != null && serversById.containsKey(base.activeServerId) -> base.activeServerId
                 activeKey != null -> activeKey.serverId
+                preferredServerId != null -> preferredServerId
                 serversById.isNotEmpty() -> serversById.keys.first()
                 else -> null
             }
@@ -5537,6 +6710,8 @@ class ServerManager(
                 base.connectionStatus == ServerConnectionStatus.ERROR -> ServerConnectionStatus.ERROR
                 else -> ServerConnectionStatus.READY
             }
+        val availableModels = activeServerId?.let { availableModelsByServerId[it] }.orEmpty()
+        val selectedModel = activeServerId?.let { selectedModelByServerId[it] } ?: base.selectedModel
 
         val next =
             base.copy(
@@ -5544,10 +6719,33 @@ class ServerManager(
                 servers = serversById.values.toList(),
                 savedServers = loadSavedServersInternal(),
                 accountByServerId = LinkedHashMap(accountByServerId),
+                capabilitiesByServerId = LinkedHashMap(capabilitiesByServerId),
+                slashByServerId = LinkedHashMap(slashByServerId),
+                agentOptionsByServerId = LinkedHashMap(agentOptionsByServerId),
+                selectedAgentByServerId = LinkedHashMap(selectedAgentByServerId),
                 activeServerId = activeServerId,
+                availableModels = availableModels,
+                selectedModel = selectedModel,
                 threads = sortedThreads,
                 activeThreadKey = activeKey,
-                pendingApprovals = pendingApprovalsById.values.toList(),
+                pendingInteractions =
+                    (pendingApprovalsById.values.map { approval ->
+                        PendingInteraction(
+                            id = approval.id,
+                            serverId = approval.serverId,
+                            kind = PendingInteractionKind.APPROVAL,
+                            approval = approval,
+                            createdAtEpochMillis = approval.createdAtEpochMillis,
+                        )
+                    } + pendingQuestionsById.values.map { question ->
+                        PendingInteraction(
+                            id = question.id,
+                            serverId = question.serverId,
+                            kind = PendingInteractionKind.QUESTION,
+                            question = question,
+                            createdAtEpochMillis = question.createdAtEpochMillis,
+                        )
+                    }).sortedBy { it.createdAtEpochMillis },
                 toolTargetLabelsById = toolTargetLabelsById,
             )
         state = next
@@ -5582,10 +6780,18 @@ class ServerManager(
         }
     }
 
-    private fun persistSavedServersInternal() {
-        val payload = JSONArray()
+    private fun persistSavedServersInternal(removedServerIds: Set<String> = emptySet()) {
+        // Merge: start with existing saved servers (preserving offline ones), then overlay connected servers
+        val existing = loadSavedServersInternal().associateBy { it.id }.toMutableMap()
+        // Remove explicitly deleted servers
+        removedServerIds.forEach { existing.remove(it) }
+        // Overlay currently connected servers (they may have updated fields like directory)
         for (server in serversById.values) {
             val saved = SavedServer.from(server)
+            existing[saved.id] = saved
+        }
+        val payload = JSONArray()
+        for (saved in existing.values) {
             payload.put(
                 JSONObject()
                     .put("id", saved.id)
@@ -5593,7 +6799,11 @@ class ServerManager(
                     .put("host", saved.host)
                     .put("port", saved.port)
                     .put("source", saved.source)
-                    .put("hasCodexServer", saved.hasCodexServer),
+                    .put("backendKind", saved.backendKind)
+                    .put("hasCodexServer", saved.hasCodexServer)
+                    .put("username", saved.username ?: JSONObject.NULL)
+                    .put("password", saved.password ?: JSONObject.NULL)
+                    .put("directory", saved.directory ?: JSONObject.NULL),
             )
         }
         savedServersPreferences
@@ -5605,30 +6815,60 @@ class ServerManager(
     private fun loadSavedServersInternal(): List<SavedServer> {
         val raw = savedServersPreferences?.getString(savedServersKey, null) ?: return emptyList()
         val parsed = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
-        val out = mutableListOf<SavedServer>()
+        val out = LinkedHashMap<String, SavedServer>()
         for (index in 0 until parsed.length()) {
             val item = parsed.optJSONObject(index) ?: continue
-            val id = item.optString("id").trim()
             val name = item.optString("name").trim()
-            val host = normalizeServerHost(item.optString("host"))
+            val backendKind = item.optString("backendKind").trim()
+            val kind = BackendKind.from(backendKind)
+            val host =
+                normalizeServerHost(
+                    item.optString("host"),
+                    preserveScheme = kind == BackendKind.OPENCODE,
+                )
             val port = item.optInt("port", 0)
             val source = item.optString("source").trim()
             val hasCodexServer = item.optBoolean("hasCodexServer", true)
+            val id =
+                if (ServerSource.from(source) == ServerSource.MANUAL) {
+                    manualServerId(kind, host, port)
+                } else {
+                    item.optString("id").trim()
+                }
             if (id.isEmpty() || host.isEmpty() || port <= 0) {
                 continue
             }
-            out +=
+            out.remove(id)
+            out[id] =
                 SavedServer(
                     id = id,
                     name = if (name.isEmpty()) host else name,
                     host = host,
                     port = port,
                     source = source,
+                    backendKind = backendKind,
                     hasCodexServer = hasCodexServer,
+                    username = nullableString(item, "username"),
+                    password = nullableString(item, "password"),
+                    directory = nullableString(item, "directory"),
                 )
         }
-        return out
+        return out.values.toList()
     }
+}
+
+private fun nullableString(
+    item: JSONObject,
+    key: String,
+): String? {
+    if (item.isNull(key)) {
+        return null
+    }
+    val value = item.optString(key).trim()
+    if (value.isEmpty() || value.equals("null", ignoreCase = true)) {
+        return null
+    }
+    return value
 }
 
 internal fun computePlaceholderKeysToPrune(

@@ -105,6 +105,7 @@
 		464A225E795EB7EC5886D492 /* art_and_illustration.md in Resources */ = {isa = PBXBuildFile; fileRef = E860F8954D2417BDC6047766 /* art_and_illustration.md */; };
 		4715DB99670B992DE1C7E3CC /* ssh_cmd.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F3E5EA401672455EF2B1B5F1 /* ssh_cmd.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		47925B9BB94DF1A6E56DA99E /* gruvbox-light-medium.json in Resources */ = {isa = PBXBuildFile; fileRef = 22CBBA9F8B0545510F2AF720 /* gruvbox-light-medium.json */; };
+		4849926C6A6B218DCEB3AB26 /* NetworkDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BBD99B498CE5D6A1B9C87F1 /* NetworkDiscoveryTests.swift */; };
 		485C66498200F701262CAE05 /* night-owl.json in Resources */ = {isa = PBXBuildFile; fileRef = 14B7D7A9258301037FB7DBC0 /* night-owl.json */; };
 		49005F651AE38A7F3F3C89F7 /* ConversationPlanSemanticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36FEBF9CE861A652C25B7F6 /* ConversationPlanSemanticsTests.swift */; };
 		498B7F8D473FDF27CBFEADF3 /* github-light-high-contrast.json in Resources */ = {isa = PBXBuildFile; fileRef = 70AB8E0BCCF3384EE9B4A0BF /* github-light-high-contrast.json */; };
@@ -547,6 +548,7 @@
 		56CF8611EBE489C15696819A /* nord.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = nord.json; sourceTree = "<group>"; };
 		59B08FFA16CBFD1A93E32980 /* sentry-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "sentry-dark.json"; sourceTree = "<group>"; };
 		5B2CEDF857883B2E36157356 /* gruvbox-dark-medium.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-dark-medium.json"; sourceTree = "<group>"; };
+		5BBD99B498CE5D6A1B9C87F1 /* NetworkDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscoveryTests.swift; sourceTree = "<group>"; };
 		5D15D6BDA456B49C319AB4F8 /* CodexTurnLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTurnLiveActivity.swift; sourceTree = "<group>"; };
 		5DF2C84DD77E7A8282AE9831 /* slack-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "slack-dark.json"; sourceTree = "<group>"; };
 		5FB346B6064CA358E9EEAD00 /* notion-dark-BTRKJ-yg.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "notion-dark-BTRKJ-yg.json"; sourceTree = "<group>"; };
@@ -853,6 +855,7 @@
 			children = (
 				B36FEBF9CE861A652C25B7F6 /* ConversationPlanSemanticsTests.swift */,
 				89D9552DC45A94A8F6F33671 /* HomeDashboardSupportTests.swift */,
+				5BBD99B498CE5D6A1B9C87F1 /* NetworkDiscoveryTests.swift */,
 				92C9409CEC5879D35679844C /* PerformanceHelpersTests.swift */,
 				A957BE5C4130C57E3CAB4547 /* ThreadOpenHydrationTests.swift */,
 				9B00D3C4EBCC298CE54D2D02 /* ToolCallMessageParserTests.swift */,
@@ -1426,6 +1429,7 @@
 			files = (
 				49005F651AE38A7F3F3C89F7 /* ConversationPlanSemanticsTests.swift in Sources */,
 				7A803091FAF581F8FD256C2A /* HomeDashboardSupportTests.swift in Sources */,
+				4849926C6A6B218DCEB3AB26 /* NetworkDiscoveryTests.swift in Sources */,
 				5F273A333519617C9C9A5D13 /* PerformanceHelpersTests.swift in Sources */,
 				4C57A4E5A551B94E99F3D3EC /* ThreadOpenHydrationTests.swift in Sources */,
 				178E05A70211238A1D49F6C2 /* ToolCallMessageParserTests.swift in Sources */,

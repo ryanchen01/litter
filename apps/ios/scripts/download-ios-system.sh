@@ -60,5 +60,6 @@ download_named() {
 download_named openssl "$OPENSSL_BASE/openssl-dynamic.xcframework.zip"
 download_named libssh2 "$LIBSSH2_BASE/libssh2-dynamic.xcframework.zip"
 
+"$SCRIPT_DIR/sanitize-ios-frameworks.sh" "$DEST"
 
 echo "==> ios_system xcframeworks ready in $DEST/"

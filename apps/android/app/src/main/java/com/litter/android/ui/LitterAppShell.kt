@@ -69,7 +69,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -85,6 +84,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Search
@@ -5059,291 +5059,295 @@ private fun InputBar(
     }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 16.dp, top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-            if (attachedImagePath != null) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = LitterTheme.surfaceLight,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
-                    modifier = Modifier.padding(bottom = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null,
-                            tint = LitterTheme.accent,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            text = attachedImagePath.substringAfterLast('/'),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = LitterTheme.textPrimary,
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = onClearAttachment, 
-                            enabled = !isSending,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Remove attachment", modifier = Modifier.size(14.dp), tint = LitterTheme.textSecondary)
-                        }
-                    }
-                }
-            }
-
-            if (!attachmentError.isNullOrBlank()) {
-                Text(
-                    text = attachmentError,
-                    color = LitterTheme.danger,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-
-            if (showSlashPopup) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
-                ) {
-                    Column {
-                        if (activeBackendKind == BackendKind.OPENCODE) {
-                            openCodeSlashSuggestions.forEachIndexed { index, entry ->
-                                Row(
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clickable { applyOpenCodeSlashSuggestion(entry) }
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = entry.displayName.ifBlank { "/${entry.name}" },
-                                        color = LitterTheme.success,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    Text(
-                                        text = entry.description.ifBlank { entry.category },
-                                        color = LitterTheme.textSecondary,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                if (index < openCodeSlashSuggestions.lastIndex) {
-                                    HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
-                                }
-                            }
-                        } else {
-                            codexSlashSuggestions.forEachIndexed { index, command ->
-                                Row(
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clickable { applyCodexSlashSuggestion(command) }
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = "/${command.rawValue}",
-                                        color = LitterTheme.success,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    Text(
-                                        text = command.description,
-                                        color = LitterTheme.textSecondary,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                if (index < codexSlashSuggestions.lastIndex) {
-                                    HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (showFilePopup) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
-                ) {
-                    when {
-                        fileSearchLoading -> {
-                            Text(
-                                text = "Searching files...",
-                                color = LitterTheme.textSecondary,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            )
-                        }
-
-                        !fileSearchError.isNullOrBlank() -> {
-                            Text(
-                                text = fileSearchError.orEmpty(),
-                                color = LitterTheme.danger,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            )
-                        }
-
-                        fileSuggestions.isEmpty() -> {
-                            Text(
-                                text = "No matches",
-                                color = LitterTheme.textSecondary,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            )
-                        }
-
-                        else -> {
-                            val visibleSuggestions = fileSuggestions.take(8)
-                            Column {
-                                visibleSuggestions.forEachIndexed { index, suggestion ->
-                                    Row(
-                                        modifier =
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clickable { applyFileSuggestion(suggestion) }
-                                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Folder,
-                                            contentDescription = null,
-                                            tint = LitterTheme.textSecondary,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                        Text(
-                                            text = suggestion.path,
-                                            color = LitterTheme.textPrimary,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
-                                    if (index < visibleSuggestions.lastIndex) {
-                                        HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (showSkillPopup) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
-                ) {
-                    when {
-                        skillsLoading && skillSuggestions.isEmpty() -> {
-                            Text(
-                                text = "Loading skills...",
-                                color = LitterTheme.textSecondary,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            )
-                        }
-
-                        skillSuggestions.isEmpty() -> {
-                            Text(
-                                text = "No skills found",
-                                color = LitterTheme.textSecondary,
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            )
-                        }
-
-                        else -> {
-                            val visibleSuggestions = skillSuggestions.take(8)
-                            Column {
-                                visibleSuggestions.forEachIndexed { index, skill ->
-                                    Row(
-                                        modifier =
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .clickable { applySkillSuggestion(skill) }
-                                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = "\$${skill.name}",
-                                            color = LitterTheme.success,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                        )
-                                        Text(
-                                            text = skill.description,
-                                            color = LitterTheme.textSecondary,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
-                                    if (index < visibleSuggestions.lastIndex) {
-                                        HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(26.dp),
-            color = LitterTheme.surfaceLight,
-            border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
-        ) {
-            val actionButtonSize = 36.dp
-            val actionIconSize = 18.dp
-            Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        // Attached image preview
+        if (attachedImagePath != null) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = LitterTheme.surfaceLight,
+                border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = null,
+                        tint = LitterTheme.accent,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = attachedImagePath.substringAfterLast('/'),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = LitterTheme.textPrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = onClearAttachment,
+                        enabled = !isSending,
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove attachment", modifier = Modifier.size(14.dp), tint = LitterTheme.textSecondary)
+                    }
+                }
+            }
+        }
+
+        if (!attachmentError.isNullOrBlank()) {
+            Text(
+                text = attachmentError,
+                color = LitterTheme.danger,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
+        // Slash / file / skill popup suggestions
+        if (showSlashPopup) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+            ) {
+                Column {
+                    if (activeBackendKind == BackendKind.OPENCODE) {
+                        openCodeSlashSuggestions.forEachIndexed { index, entry ->
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { applyOpenCodeSlashSuggestion(entry) }
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = entry.displayName.ifBlank { "/${entry.name}" },
+                                    color = LitterTheme.success,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = entry.description.ifBlank { entry.category },
+                                    color = LitterTheme.textSecondary,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (index < openCodeSlashSuggestions.lastIndex) {
+                                HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
+                            }
+                        }
+                    } else {
+                        codexSlashSuggestions.forEachIndexed { index, command ->
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { applyCodexSlashSuggestion(command) }
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "/${command.rawValue}",
+                                    color = LitterTheme.success,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = command.description,
+                                    color = LitterTheme.textSecondary,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (index < codexSlashSuggestions.lastIndex) {
+                                HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showFilePopup) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+            ) {
+                when {
+                    fileSearchLoading -> {
+                        Text(
+                            text = "Searching files...",
+                            color = LitterTheme.textSecondary,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    !fileSearchError.isNullOrBlank() -> {
+                        Text(
+                            text = fileSearchError.orEmpty(),
+                            color = LitterTheme.danger,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    fileSuggestions.isEmpty() -> {
+                        Text(
+                            text = "No matches",
+                            color = LitterTheme.textSecondary,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    else -> {
+                        val visibleSuggestions = fileSuggestions.take(8)
+                        Column {
+                            visibleSuggestions.forEachIndexed { index, suggestion ->
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable { applyFileSuggestion(suggestion) }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = null,
+                                        tint = LitterTheme.textSecondary,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Text(
+                                        text = suggestion.path,
+                                        color = LitterTheme.textPrimary,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                if (index < visibleSuggestions.lastIndex) {
+                                    HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showSkillPopup) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = LitterTheme.surfaceLight.copy(alpha = 0.98f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+            ) {
+                when {
+                    skillsLoading && skillSuggestions.isEmpty() -> {
+                        Text(
+                            text = "Loading skills...",
+                            color = LitterTheme.textSecondary,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    skillSuggestions.isEmpty() -> {
+                        Text(
+                            text = "No skills found",
+                            color = LitterTheme.textSecondary,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+
+                    else -> {
+                        val visibleSuggestions = skillSuggestions.take(8)
+                        Column {
+                            visibleSuggestions.forEachIndexed { index, skill ->
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable { applySkillSuggestion(skill) }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "\$${skill.name}",
+                                        color = LitterTheme.success,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        text = skill.description,
+                                        color = LitterTheme.textSecondary,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                if (index < visibleSuggestions.lastIndex) {
+                                    HorizontalDivider(color = LitterTheme.border, thickness = 0.5.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // iOS-style entry row: [+circle] [textfield pill] [Cancel capsule OR nothing]
+        val actionButtonSize = 36.dp
+        val actionIconSize = 18.dp
+        val hasText = composerValue.text.isNotBlank()
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Plus button outside the pill (iOS: shown when not recording/sending)
+            if (!isSending) {
                 Box {
                     Box(
                         modifier = Modifier
                             .size(actionButtonSize)
                             .clip(CircleShape)
-                            .background(LitterTheme.surface)
-                            .clickable(enabled = !isSending) { showAttachmentMenu = true },
+                            .background(LitterTheme.surfaceLight)
+                            .border(1.dp, LitterTheme.border.copy(alpha = 0.4f), CircleShape)
+                            .clickable { showAttachmentMenu = true },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Default.Add,
                             contentDescription = "Attachments",
                             modifier = Modifier.size(actionIconSize),
-                            tint = LitterTheme.textPrimary
+                            tint = LitterTheme.textPrimary,
                         )
                     }
-
                     DropdownMenu(
                         expanded = showAttachmentMenu,
                         onDismissRequest = { showAttachmentMenu = false },
@@ -5355,7 +5359,7 @@ private fun InputBar(
                                 showAttachmentMenu = false
                                 onAttachImage()
                             },
-                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp), tint = LitterTheme.textSecondary) }
+                            leadingIcon = { Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(18.dp), tint = LitterTheme.textSecondary) },
                         )
                         DropdownMenuItem(
                             text = { Text("Camera", color = LitterTheme.textPrimary, style = MaterialTheme.typography.bodyMedium) },
@@ -5363,120 +5367,144 @@ private fun InputBar(
                                 showAttachmentMenu = false
                                 onCaptureImage()
                             },
-                            leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp), tint = LitterTheme.textSecondary) }
+                            leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp), tint = LitterTheme.textSecondary) },
                         )
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 4.dp, horizontal = 4.dp),
-                    contentAlignment = Alignment.CenterStart
+            // Text field pill (iOS: GlassRoundedRect cornerRadius=20)
+            Surface(
+                modifier = Modifier.weight(1f).heightIn(min = actionButtonSize),
+                shape = RoundedCornerShape(20.dp),
+                color = LitterTheme.surfaceLight,
+                border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 0.dp, end = 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (composerValue.text.isEmpty()) {
-                        Text(
-                            text = "Message litter...",
-                            color = LitterTheme.textMuted,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                    BasicTextField(
-                        value = composerValue,
-                        onValueChange = { nextValue ->
-                            composerValue = nextValue
-                            commitDraftIfNeeded(nextValue.text)
-                            refreshComposerPopups(nextValue)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = LitterTheme.textPrimary),
-                        cursorBrush = SolidColor(LitterTheme.accent),
-                        maxLines = 5,
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                if (isSending) {
                     Box(
                         modifier = Modifier
-                            .size(actionButtonSize)
-                            .clip(CircleShape)
-                            .background(LitterTheme.surface)
-                            .clickable { onInterrupt() },
-                        contentAlignment = Alignment.Center,
+                            .weight(1f)
+                            .padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = "Interrupt",
-                            modifier = Modifier.size(actionIconSize),
-                            tint = LitterTheme.danger
+                        if (composerValue.text.isEmpty()) {
+                            Text(
+                                text = "Message litter...",
+                                color = LitterTheme.textMuted,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        BasicTextField(
+                            value = composerValue,
+                            onValueChange = { nextValue ->
+                                composerValue = nextValue
+                                commitDraftIfNeeded(nextValue.text)
+                                refreshComposerPopups(nextValue)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = LitterTheme.textPrimary),
+                            cursorBrush = SolidColor(LitterTheme.accent),
+                            maxLines = 5,
                         )
                     }
-                } else {
-                    val canSend = (composerValue.text.isNotBlank() || attachedImagePath != null)
-                    Box(
-                        modifier = Modifier
-                            .size(actionButtonSize)
-                            .clip(CircleShape)
-                            .background(if (canSend) LitterTheme.accent else Color.Transparent)
-                            .clickable(enabled = canSend) {
-                                val currentDraft = composerValue.text
-                                val trimmed = currentDraft.trim()
-                                if (attachedImagePath == null) {
-                                    if (activeBackendKind == BackendKind.OPENCODE) {
-                                        val invocation = parseOpenCodeSlashInvocation(trimmed, activeSlashEntries)
-                                        if (invocation != null) {
-                                            composerValue = TextFieldValue(text = "", selection = TextRange(0))
-                                            commitDraftIfNeeded("")
-                                            hideComposerPopups()
-                                            focusManager.clearFocus(force = true)
-                                            keyboardController?.hide()
-                                            if (invocation.entry.kind == SlashKind.ACTION) {
-                                                executeOpenCodeAction(invocation.entry.actionId ?: "", invocation.args)
-                                            } else {
-                                                onExecuteOpenCodeCommand(invocation.entry.name, invocation.args.orEmpty()) { result ->
-                                                    result.onFailure { error ->
-                                                        slashErrorMessage = error.message ?: "Failed to run slash command"
+
+                    // Trailing icon inside pill: send arrow (has text) or mic (idle)
+                    if (hasText) {
+                        Box(
+                            modifier = Modifier
+                                .size(actionButtonSize)
+                                .padding(end = 4.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    val currentDraft = composerValue.text
+                                    val trimmed = currentDraft.trim()
+                                    if (attachedImagePath == null) {
+                                        if (activeBackendKind == BackendKind.OPENCODE) {
+                                            val invocation = parseOpenCodeSlashInvocation(trimmed, activeSlashEntries)
+                                            if (invocation != null) {
+                                                composerValue = TextFieldValue(text = "", selection = TextRange(0))
+                                                commitDraftIfNeeded("")
+                                                hideComposerPopups()
+                                                focusManager.clearFocus(force = true)
+                                                keyboardController?.hide()
+                                                if (invocation.entry.kind == SlashKind.ACTION) {
+                                                    executeOpenCodeAction(invocation.entry.actionId ?: "", invocation.args)
+                                                } else {
+                                                    onExecuteOpenCodeCommand(invocation.entry.name, invocation.args.orEmpty()) { result ->
+                                                        result.onFailure { error ->
+                                                            slashErrorMessage = error.message ?: "Failed to run slash command"
+                                                        }
                                                     }
                                                 }
+                                                return@clickable
                                             }
-                                            return@clickable
-                                        }
-                                    } else {
-                                        val invocation = parseSlashCommandInvocation(trimmed)
-                                        if (invocation != null) {
-                                            composerValue = TextFieldValue(text = "", selection = TextRange(0))
-                                            commitDraftIfNeeded("")
-                                            hideComposerPopups()
-                                            focusManager.clearFocus(force = true)
-                                            keyboardController?.hide()
-                                            executeCodexSlashCommand(invocation.command, invocation.args)
-                                            return@clickable
+                                        } else {
+                                            val invocation = parseSlashCommandInvocation(trimmed)
+                                            if (invocation != null) {
+                                                composerValue = TextFieldValue(text = "", selection = TextRange(0))
+                                                commitDraftIfNeeded("")
+                                                hideComposerPopups()
+                                                focusManager.clearFocus(force = true)
+                                                keyboardController?.hide()
+                                                executeCodexSlashCommand(invocation.command, invocation.args)
+                                                return@clickable
+                                            }
                                         }
                                     }
-                                }
-                                focusManager.clearFocus(force = true)
-                                keyboardController?.hide()
-                                composerValue = TextFieldValue(text = "", selection = TextRange(0))
-                                commitDraftIfNeeded("")
-                                val skillMentions = collectSkillMentionsForSubmission(currentDraft)
-                                onSend(currentDraft, skillMentions)
-                                hideComposerPopups()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            modifier = Modifier.size(actionIconSize),
-                            tint = if (canSend) LitterTheme.surface else LitterTheme.textMuted
-                        )
+                                    focusManager.clearFocus(force = true)
+                                    keyboardController?.hide()
+                                    composerValue = TextFieldValue(text = "", selection = TextRange(0))
+                                    commitDraftIfNeeded("")
+                                    val skillMentions = collectSkillMentionsForSubmission(currentDraft)
+                                    onSend(currentDraft, skillMentions)
+                                    hideComposerPopups()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowUpward,
+                                contentDescription = "Send",
+                                modifier = Modifier.size(actionIconSize),
+                                tint = LitterTheme.accent,
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(actionButtonSize)
+                                .padding(end = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = "Voice input",
+                                modifier = Modifier.size(actionIconSize - 2.dp),
+                                tint = LitterTheme.textSecondary,
+                            )
+                        }
                     }
                 }
-        }
+            }
+
+            // Cancel capsule (iOS: shown when isTurnActive / isSending)
+            if (isSending) {
+                Surface(
+                    onClick = onInterrupt,
+                    shape = RoundedCornerShape(50),
+                    color = LitterTheme.surfaceLight,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, LitterTheme.border),
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = LitterTheme.textPrimary,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -7376,6 +7404,7 @@ private fun DiscoverySheet(
                 }
         }
     }
+}
 }
 
 @Composable

@@ -1,19 +1,22 @@
 import SwiftUI
 
 struct HomeDashboardView: View {
-    let recentSessions: [ThreadState]
-    let connectedServers: [ServerConnection]
+    let recentSessions: [HomeDashboardRecentSession]
+    let connectedServers: [HomeDashboardServer]
     let openingRecentSessionKey: ThreadKey?
     let isStartingNewSession: Bool
-    let onOpenRecentSession: @MainActor (ThreadState) async -> Void
-    let onOpenServerSessions: (ServerConnection) -> Void
+    let onOpenRecentSession: @MainActor (HomeDashboardRecentSession) async -> Void
+    let onOpenServerSessions: (HomeDashboardServer) -> Void
     let onNewSession: () -> Void
     let onConnectServer: () -> Void
     let onShowSettings: () -> Void
     var onDeleteThread: ((ThreadKey) async -> Void)? = nil
     var onDisconnectServer: ((String) -> Void)? = nil
-    @State private var deleteTargetThread: ThreadState?
-    @State private var disconnectTargetServer: ServerConnection?
+    var onRenameServer: ((String, String) -> Void)? = nil
+    @State private var deleteTargetThread: HomeDashboardRecentSession?
+    @State private var disconnectTargetServer: HomeDashboardServer?
+    @State private var renameTargetServer: HomeDashboardServer?
+    @State private var renameText = ""
 
     var body: some View {
         ScrollView {
@@ -47,13 +50,31 @@ struct HomeDashboardView: View {
         )) {
             Button("Cancel", role: .cancel) { disconnectTargetServer = nil }
             Button("Disconnect", role: .destructive) {
-                if let conn = disconnectTargetServer {
-                    onDisconnectServer?(conn.id)
+                if let server = disconnectTargetServer {
+                    onDisconnectServer?(server.id)
                 }
                 disconnectTargetServer = nil
             }
         } message: {
-            Text("Disconnect from \"\(disconnectTargetServer?.server.name ?? "this server")\"?")
+            Text("Disconnect from \"\(disconnectTargetServer?.displayName ?? "this server")\"?")
+        }
+        .alert("Rename Server", isPresented: Binding(
+            get: { renameTargetServer != nil },
+            set: { if !$0 { renameTargetServer = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameTargetServer = nil }
+            Button("Save") {
+                if let server = renameTargetServer {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        onRenameServer?(server.id, trimmed)
+                    }
+                }
+                renameTargetServer = nil
+            }
+        } message: {
+            Text("Enter a new name for this server.")
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -66,7 +87,10 @@ struct HomeDashboardView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                BrandLogo(size: 44)
+                AnimatedLogo(size: 64)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                SupporterBadge()
             }
         }
     }
@@ -122,16 +146,24 @@ struct HomeDashboardView: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(connectedServers) { connection in
+                    ForEach(connectedServers) { server in
                         Button {
-                            onOpenServerSessions(connection)
+                            onOpenServerSessions(server)
                         } label: {
-                            connectedServerRow(connection)
+                            connectedServerRow(server)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            if !server.isLocal {
+                                Button {
+                                    renameText = server.displayName
+                                    renameTargetServer = server
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                            }
                             Button(role: .destructive) {
-                                disconnectTargetServer = connection
+                                disconnectTargetServer = server
                             } label: {
                                 Label("Disconnect Server", systemImage: "bolt.slash")
                             }
@@ -183,109 +215,46 @@ struct HomeDashboardView: View {
         }
     }
 
-    private func recentSessionCard(_ thread: ThreadState) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: thread.hasTurnActive ? "sparkles" : "text.bubble")
-                .litterFont(size: 16, weight: .medium)
-                .foregroundColor(LitterTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(LitterTheme.accent.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(thread.sessionTitle)
-                    .litterFont(.subheadline)
-                    .foregroundColor(LitterTheme.textPrimary)
-                    .lineLimit(1)
-
-                HStack(spacing: 6) {
-                    Text(thread.serverName)
-
-                    if let workspace = HomeDashboardSupport.workspaceLabel(for: thread) {
-                        metadataDivider
-                        Text(workspace)
-                    }
-
-                    metadataDivider
-                    Text(thread.updatedAt, style: .relative)
-                }
-                .litterFont(.caption)
-                .foregroundColor(LitterTheme.textMuted)
-                .lineLimit(1)
+    private func recentSessionCard(_ thread: HomeDashboardRecentSession) -> some View {
+        let subtitle: String = {
+            var parts = [thread.serverDisplayName]
+            if let workspace = HomeDashboardSupport.workspaceLabel(for: thread.cwd) {
+                parts.append(workspace)
             }
+            return parts.joined(separator: " · ")
+        }()
 
-            Spacer(minLength: 0)
+        let trailing: SessionServerCardRow.Trailing = {
+            if openingRecentSessionKey == thread.key { return .none }
+            if thread.hasTurnActive { return .badge("Thinking") }
+            return .chevron
+        }()
 
+        return ZStack {
+            SessionServerCardRow(
+                icon: thread.hasTurnActive ? "sparkles" : "text.bubble",
+                title: thread.sessionTitle,
+                subtitle: subtitle,
+                trailing: trailing
+            )
             if openingRecentSessionKey == thread.key {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(LitterTheme.accent)
-            } else if thread.hasTurnActive {
-                statusBadge("Thinking")
-            } else {
-                Image(systemName: "chevron.right")
-                    .litterFont(size: 12, weight: .semibold)
-                    .foregroundColor(LitterTheme.textMuted)
+                HStack {
+                    Spacer()
+                    ProgressView().controlSize(.small).tint(LitterTheme.accent)
+                }
+                .padding(.trailing, 14)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(LitterTheme.surface.opacity(0.6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(LitterTheme.border.opacity(0.7), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("home.recentSessionCard")
     }
 
-    private func connectedServerRow(_ connection: ServerConnection) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: connection.server.source == .local ? "iphone" : "server.rack")
-                .litterFont(size: 16, weight: .medium)
-                .foregroundColor(LitterTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(LitterTheme.accent.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(connection.server.name)
-                    .litterFont(.subheadline)
-                    .foregroundColor(LitterTheme.textPrimary)
-                    .lineLimit(1)
-
-                Text(HomeDashboardSupport.serverSubtitle(for: connection.server))
-                    .litterFont(.caption)
-                    .foregroundColor(LitterTheme.textMuted)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(LitterTheme.accent)
-                    .frame(width: 8, height: 8)
-
-                Text("Connected")
-                    .litterFont(.caption)
-                    .foregroundColor(LitterTheme.textMuted)
-
-                Image(systemName: "chevron.right")
-                    .litterFont(size: 12, weight: .semibold)
-                    .foregroundColor(LitterTheme.textMuted)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(LitterTheme.surface.opacity(0.6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(LitterTheme.border.opacity(0.7), lineWidth: 1)
+    private func connectedServerRow(_ server: HomeDashboardServer) -> some View {
+        SessionServerCardRow(
+            icon: server.isLocal ? "iphone" : "server.rack",
+            title: server.displayName,
+            subtitle: HomeDashboardSupport.serverSubtitle(for: server),
+            trailing: .status(connected: server.health == .connected)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("home.connectedServerRow")
     }
 
@@ -308,21 +277,5 @@ struct HomeDashboardView: View {
                 .stroke(LitterTheme.border.opacity(0.65), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private func statusBadge(_ title: String) -> some View {
-        Text(title)
-            .litterFont(.caption)
-            .foregroundColor(LitterTheme.accent)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(LitterTheme.accent.opacity(0.14))
-            .clipShape(Capsule())
-    }
-
-    private var metadataDivider: some View {
-        Circle()
-            .fill(LitterTheme.textMuted.opacity(0.7))
-            .frame(width: 3, height: 3)
     }
 }

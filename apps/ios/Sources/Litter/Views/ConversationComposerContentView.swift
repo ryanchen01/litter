@@ -3,7 +3,7 @@ import UIKit
 
 struct ConversationComposerContentView: View {
     let attachedImage: UIImage?
-    let pendingUserInputRequest: ServerManager.PendingUserInputRequest?
+    let pendingUserInputRequest: PendingUserInputRequest?
     let rateLimits: RateLimitSnapshot?
     let contextPercent: Int64?
     let isTurnActive: Bool
@@ -21,7 +21,7 @@ struct ConversationComposerContentView: View {
 
     init(
         attachedImage: UIImage?,
-        pendingUserInputRequest: ServerManager.PendingUserInputRequest?,
+        pendingUserInputRequest: PendingUserInputRequest?,
         rateLimits: RateLimitSnapshot?,
         contextPercent: Int64?,
         isTurnActive: Bool,

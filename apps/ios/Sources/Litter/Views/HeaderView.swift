@@ -1,18 +1,26 @@
+import SafariServices
 import SwiftUI
-import Inject
 
 struct HeaderView: View {
-    @ObserveInjection var inject
     @Environment(AppState.self) private var appState
-    let thread: ThreadState
-    let connection: ServerConnection
-    let serverManager: ServerManager
+    @Environment(AppModel.self) private var appModel
+    let thread: AppThreadSnapshot
     let onBack: () -> Void
+    var onInfo: (() -> Void)?
     @State private var isReloading = false
     @State private var pulsing = false
+    @State private var remoteAuthSession: RemoteAuthSession?
     @AppStorage("fastMode") private var fastMode = false
 
     var topInset: CGFloat = 0
+
+    private var server: AppServerSnapshot? {
+        appModel.snapshot?.serverSnapshot(for: thread.key.serverId)
+    }
+
+    private var availableModels: [Model] {
+        appModel.availableModels(for: thread.key.serverId)
+    }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -63,11 +71,23 @@ struct HeaderView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
 
-                        Text(sessionDirectoryLabel)
-                            .litterFont(.caption2, weight: .semibold)
-                            .foregroundColor(LitterTheme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        HStack(spacing: 6) {
+                            Text(sessionDirectoryLabel)
+                                .litterFont(.caption2, weight: .semibold)
+                                .foregroundColor(LitterTheme.textSecondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            if server?.isIpcConnected == true {
+                                Text("IPC")
+                                    .litterFont(.caption2, weight: .bold)
+                                    .foregroundColor(LitterTheme.accentStrong)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(LitterTheme.accentStrong.opacity(0.14))
+                                    .clipShape(Capsule())
+                            }
+                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -79,6 +99,8 @@ struct HeaderView: View {
                 Spacer(minLength: 0)
 
                 reloadButton
+
+                infoButton
             }
             .padding(.horizontal, 16)
             .padding(.top, topInset)
@@ -86,7 +108,7 @@ struct HeaderView: View {
 
             if appState.showModelSelector {
                 InlineModelSelectorView(
-                    models: connection.models,
+                    models: availableModels,
                     selectedModel: selectedModelBinding,
                     reasoningEffort: reasoningEffortBinding,
                     onDismiss: {
@@ -112,25 +134,43 @@ struct HeaderView: View {
         .task(id: thread.key) {
             await loadModelsIfNeeded()
         }
-        .enableInjection()
+        .sheet(item: $remoteAuthSession) { session in
+            InAppSafariView(url: session.url)
+                .ignoresSafeArea()
+        }
+        .onChange(of: server?.account != nil) { _, isLoggedIn in
+            if isLoggedIn {
+                remoteAuthSession = nil
+            }
+        }
     }
 
     private var shouldPulse: Bool {
-        connection.connectionHealth == .connecting || connection.connectionHealth == .unresponsive
+        guard let health = server?.health else { return false }
+        return health == .connecting || health == .unresponsive
     }
 
     private var statusDotColor: Color {
-        switch connection.connectionHealth {
-        case .disconnected:
-            return LitterTheme.danger
+        guard let server else {
+            return LitterTheme.textMuted
+        }
+        switch server.health {
         case .connecting, .unresponsive:
             return .orange
         case .connected:
-            switch connection.authStatus {
-            case .chatgpt, .apiKey: return LitterTheme.success
-            case .notLoggedIn: return LitterTheme.danger
-            case .unknown: return LitterTheme.textMuted
+            if server.isLocal {
+                switch server.account {
+                case .chatgpt?, .apiKey?:
+                    return LitterTheme.success
+                case nil:
+                    return LitterTheme.danger
+                }
             }
+            return server.account == nil ? .orange : LitterTheme.success
+        case .disconnected:
+            return LitterTheme.danger
+        case .unknown:
+            return LitterTheme.textMuted
         }
     }
 
@@ -138,7 +178,7 @@ struct HeaderView: View {
         let pendingModel = appState.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !pendingModel.isEmpty { return pendingModel }
 
-        let threadModel = thread.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let threadModel = (thread.model ?? thread.info.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !threadModel.isEmpty { return threadModel }
 
         return "litter"
@@ -152,17 +192,17 @@ struct HeaderView: View {
         if !threadReasoning.isEmpty { return threadReasoning }
 
         // Fall back to the model's default reasoning effort from the loaded model list.
-        let currentModel = thread.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let model = connection.models.first(where: { $0.model == currentModel }),
-           !model.defaultReasoningEffort.isEmpty {
-            return model.defaultReasoningEffort
+        let currentModel = (thread.model ?? thread.info.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let model = availableModels.first(where: { $0.model == currentModel }),
+           !model.defaultReasoningEffort.wireValue.isEmpty {
+            return model.defaultReasoningEffort.wireValue
         }
 
         return "default"
     }
 
     private var sessionDirectoryLabel: String {
-        let currentDirectory = thread.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentDirectory = (thread.info.cwd ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !currentDirectory.isEmpty {
             return abbreviateHomePath(currentDirectory)
         }
@@ -175,7 +215,7 @@ struct HeaderView: View {
             get: {
                 let pending = appState.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !pending.isEmpty { return pending }
-                return thread.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (thread.model ?? thread.info.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             },
             set: { appState.selectedModel = $0 }
         )
@@ -193,25 +233,47 @@ struct HeaderView: View {
     }
 
     private func loadModelsIfNeeded() async {
-        guard connection.isConnected, !connection.modelsLoaded else { return }
-        do {
-            let resp = try await connection.listModels()
-            connection.models = resp.data
-            connection.modelsLoaded = true
-        } catch {}
+        await appModel.loadConversationMetadataIfNeeded(serverId: thread.key.serverId)
     }
 
     private var reloadButton: some View {
         Button {
             Task {
                 isReloading = true
-                if connection.authStatus == .notLoggedIn {
+                defer { isReloading = false }
+                if await handleRemoteLoginIfNeeded() {
+                    return
+                }
+                if server?.account == nil {
                     appState.showSettings = true
                 } else {
-                    await serverManager.refreshAllSessions()
-                    await serverManager.syncActiveThreadFromServer()
+                    _ = try? await appModel.rpc.threadList(
+                        serverId: thread.key.serverId,
+                        params: ThreadListParams(
+                            cursor: nil,
+                            limit: nil,
+                            sortKey: nil,
+                            modelProviders: nil,
+                            sourceKinds: nil,
+                            archived: nil,
+                            cwd: nil,
+                            searchTerm: nil
+                        )
+                    )
+                    let response = try? await appModel.rpc.threadResume(
+                        serverId: thread.key.serverId,
+                        params: reloadLaunchConfig().threadResumeParams(
+                            threadId: thread.key.threadId,
+                            cwdOverride: thread.info.cwd
+                        )
+                    )
+                    if let response {
+                        appModel.store.setActiveThread(
+                            key: ThreadKey(serverId: thread.key.serverId, threadId: response.thread.id)
+                        )
+                    }
+                    await appModel.refreshSnapshot()
                 }
-                isReloading = false
             }
         } label: {
             Group {
@@ -222,26 +284,76 @@ struct HeaderView: View {
                 } else {
                     Image(systemName: "arrow.clockwise")
                         .litterFont(size: 16, weight: .semibold)
-                        .foregroundColor(connection.isConnected ? LitterTheme.accent : LitterTheme.textMuted)
+                        .foregroundColor(server?.isConnected == true ? LitterTheme.accent : LitterTheme.textMuted)
                 }
             }
             .frame(width: 44, height: 44)
             .modifier(GlassCircleModifier())
         }
         .accessibilityIdentifier("header.reloadButton")
-        .disabled(isReloading || !connection.isConnected)
+        .disabled(isReloading || server?.isConnected != true)
+    }
+
+    private var infoButton: some View {
+        Button {
+            onInfo?()
+        } label: {
+            Image(systemName: "info.circle")
+                .litterFont(size: 16, weight: .semibold)
+                .foregroundColor(LitterTheme.accent)
+                .frame(width: 44, height: 44)
+                .modifier(GlassCircleModifier())
+        }
+        .accessibilityIdentifier("header.infoButton")
+    }
+
+    private func handleRemoteLoginIfNeeded() async -> Bool {
+        guard let server, !server.isLocal else {
+            return false
+        }
+        guard server.account == nil else {
+            return false
+        }
+        do {
+            let authURL = try await appModel.rpc.startRemoteSshOauthLogin(
+                serverId: server.serverId
+            )
+            if let url = URL(string: authURL) {
+                await MainActor.run {
+                    remoteAuthSession = RemoteAuthSession(url: url)
+                }
+            }
+        } catch {}
+        return true
+    }
+
+    private func reloadLaunchConfig() -> AppThreadLaunchConfig {
+        let pendingModel = appState.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel = pendingModel.isEmpty ? nil : pendingModel
+        return AppThreadLaunchConfig(
+            model: resolvedModel,
+            approvalPolicy: AskForApproval(wireValue: appState.approvalPolicy),
+            sandbox: SandboxMode(wireValue: appState.sandboxMode),
+            developerInstructions: nil,
+            persistExtendedHistory: true
+        )
     }
 
 }
 
+private struct RemoteAuthSession: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct InlineModelSelectorView: View {
-    let models: [CodexModel]
+    let models: [Model]
     @Binding var selectedModel: String
     @Binding var reasoningEffort: String
     @AppStorage("fastMode") private var fastMode = false
     var onDismiss: () -> Void
 
-    private var currentModel: CodexModel? {
+    private var currentModel: Model? {
         models.first { $0.id == selectedModel }
     }
 
@@ -252,7 +364,7 @@ struct InlineModelSelectorView: View {
                     ForEach(models) { model in
                         Button {
                             selectedModel = model.id
-                            reasoningEffort = model.defaultReasoningEffort
+                            reasoningEffort = model.defaultReasoningEffort.wireValue
                             onDismiss()
                         } label: {
                             HStack {
@@ -300,15 +412,15 @@ struct InlineModelSelectorView: View {
                     HStack(spacing: 6) {
                         ForEach(info.supportedReasoningEfforts) { effort in
                             Button {
-                                reasoningEffort = effort.reasoningEffort
+                                reasoningEffort = effort.reasoningEffort.wireValue
                                 onDismiss()
                             } label: {
-                                Text(effort.reasoningEffort)
+                                Text(effort.reasoningEffort.wireValue)
                                     .litterFont(.caption2, weight: .medium)
-                                    .foregroundColor(effort.reasoningEffort == reasoningEffort ? LitterTheme.textOnAccent : LitterTheme.textPrimary)
+                                    .foregroundColor(effort.reasoningEffort.wireValue == reasoningEffort ? LitterTheme.textOnAccent : LitterTheme.textPrimary)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
-                                    .background(effort.reasoningEffort == reasoningEffort ? LitterTheme.accent : LitterTheme.surfaceLight)
+                                    .background(effort.reasoningEffort.wireValue == reasoningEffort ? LitterTheme.accent : LitterTheme.surfaceLight)
                                     .clipShape(Capsule())
                             }
                         }
@@ -347,13 +459,25 @@ struct InlineModelSelectorView: View {
     }
 }
 
+private struct InAppSafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let controller = SFSafariViewController(url: url)
+        controller.dismissButtonStyle = .close
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+
 struct ModelSelectorSheet: View {
-    let models: [CodexModel]
+    let models: [Model]
     @Binding var selectedModel: String
     @Binding var reasoningEffort: String
     @AppStorage("fastMode") private var fastMode = false
 
-    private var currentModel: CodexModel? {
+    private var currentModel: Model? {
         models.first { $0.id == selectedModel }
     }
 
@@ -362,7 +486,7 @@ struct ModelSelectorSheet: View {
             ForEach(models) { model in
                 Button {
                     selectedModel = model.id
-                    reasoningEffort = model.defaultReasoningEffort
+                    reasoningEffort = model.defaultReasoningEffort.wireValue
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -402,14 +526,14 @@ struct ModelSelectorSheet: View {
                     HStack(spacing: 6) {
                         ForEach(info.supportedReasoningEfforts) { effort in
                             Button {
-                                reasoningEffort = effort.reasoningEffort
+                                reasoningEffort = effort.reasoningEffort.wireValue
                             } label: {
-                                Text(effort.reasoningEffort)
+                                Text(effort.reasoningEffort.wireValue)
                                     .litterFont(.caption2, weight: .medium)
-                                    .foregroundColor(effort.reasoningEffort == reasoningEffort ? LitterTheme.textOnAccent : LitterTheme.textPrimary)
+                                    .foregroundColor(effort.reasoningEffort.wireValue == reasoningEffort ? LitterTheme.textOnAccent : LitterTheme.textPrimary)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
-                                    .background(effort.reasoningEffort == reasoningEffort ? LitterTheme.accent : LitterTheme.surfaceLight)
+                                    .background(effort.reasoningEffort.wireValue == reasoningEffort ? LitterTheme.accent : LitterTheme.surfaceLight)
                                     .clipShape(Capsule())
                             }
                         }
@@ -451,12 +575,10 @@ struct ModelSelectorSheet: View {
 
 #if DEBUG
 #Preview("Header") {
-    let manager = LitterPreviewData.makeServerManager()
-    return LitterPreviewScene(serverManager: manager) {
+    let appModel = LitterPreviewData.makeConversationAppModel()
+    LitterPreviewScene(appModel: appModel) {
         HeaderView(
-            thread: manager.activeThread!,
-            connection: manager.activeConnection!,
-            serverManager: manager,
+            thread: appModel.snapshot!.threads[0],
             onBack: {}
         )
     }

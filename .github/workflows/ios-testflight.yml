@@ -13,7 +13,6 @@ on:
         type: choice
         options:
           - Litter
-          - LitterRemote
       app_bundle_id:
         description: "App bundle identifier"
         required: true
@@ -50,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "run_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -86,6 +85,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Validate required secrets
         env:
@@ -127,6 +127,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        env:
+          SCCACHE_BUCKET: rust-cache
+          SCCACHE_ENDPOINT: ${{ secrets.SCCACHE_R2_ENDPOINT }}
+          SCCACHE_REGION: auto
+          SCCACHE_S3_USE_SSL: "true"
+          SCCACHE_S3_KEY_PREFIX: ci/ios
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
 
       - name: Decode App Store Connect API key
         env:
@@ -199,6 +210,8 @@ jobs:
           echo "WAIT_FOR_PROCESSING=$WAIT_FOR_PROCESSING" >> "$GITHUB_ENV"
 
       - name: Build required iOS frameworks
+        env:
+          RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
           ./apps/ios/scripts/download-ios-system.sh

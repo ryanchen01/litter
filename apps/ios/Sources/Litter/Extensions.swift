@@ -61,6 +61,16 @@ enum LitterTheme {
     static var gradientColors: [Color] {
         let isDark = UITraitCollection.current.userInterfaceStyle == .dark
         let theme = isDark ? dark : light
+        return gradientColors(for: theme, isDark: isDark)
+    }
+
+    static func gradientColors(for colorScheme: ColorScheme) -> [Color] {
+        let isDark = colorScheme == .dark
+        let theme = isDark ? dark : light
+        return gradientColors(for: theme, isDark: isDark)
+    }
+
+    private static func gradientColors(for theme: ResolvedTheme, isDark: Bool) -> [Color] {
         let bg = theme.background
         return [
             Color(hex: bg),
@@ -72,6 +82,14 @@ enum LitterTheme {
     static var backgroundGradient: LinearGradient {
         LinearGradient(
             colors: gradientColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func backgroundGradient(for colorScheme: ColorScheme) -> LinearGradient {
+        LinearGradient(
+            colors: gradientColors(for: colorScheme),
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -314,10 +332,20 @@ private extension Font.TextStyle {
     }
 }
 
-func serverIconName(for source: ServerSource) -> String {
-    switch source {
+func serverIconName(for server: DiscoveredServer) -> String {
+    if server.source == .local { return "iphone" }
+
+    if let os = server.os?.lowercased() {
+        if os.contains("windows") { return "pc" }
+        if os.contains("raspbian") { return "cpu" }
+        if os.contains("ubuntu") || os.contains("debian")
+            || os.contains("fedora") || os.contains("red hat")
+            || os.contains("freebsd") || os.contains("linux") { return "server.rack" }
+    }
+
+    switch server.source {
     case .local: return "iphone"
-    case .bonjour: return "desktopcomputer"
+    case .bonjour: return "macbook"
     case .ssh: return "terminal"
     case .tailscale: return "network"
     case .manual: return "server.rack"

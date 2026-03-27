@@ -1,5 +1,11 @@
 import Foundation
 
+// MIGRATION: The handoff state tracking (e.g. `handoffRemoteThreadKey`) in
+// `VoiceSessionState` is now managed by `RustVoiceHandoffManager` in
+// RustVoiceBridge.swift, mirroring the Rust `VoiceHandoffManager`. The UI
+// display types (`VoiceSessionPhase`, `VoiceSessionAudioRoute`, display
+// helpers, `VoiceActions` protocol) remain iOS-specific. See Task #24.
+
 struct VoiceSessionDebugEntry: Identifiable, Equatable {
     let id: UUID
     let timestamp: Date
@@ -85,15 +91,16 @@ enum VoiceSessionAudioRoute: Equatable {
         }
     }
 
+    /// SF Symbol name for the audio route.
     var iconName: String {
         switch self {
-        case .speaker: return "speaker.wave.3.fill"
-        case .receiver: return "phone.fill"
+        case .speaker:   return "speaker.wave.3.fill"
+        case .receiver:  return "phone.fill"
         case .headphones: return "headphones"
         case .bluetooth: return "dot.radiowaves.left.and.right"
-        case .airPlay: return "airplayaudio"
-        case .carPlay: return "car.fill"
-        case .unknown: return "speaker.wave.2.fill"
+        case .airPlay:   return "airplayaudio"
+        case .carPlay:   return "car.fill"
+        case .unknown:   return "speaker.wave.2.fill"
         }
     }
 }
@@ -168,27 +175,60 @@ struct VoiceSessionState: Identifiable, Equatable {
     }
 }
 
+// MARK: - Display Helpers
+
 extension VoiceSessionState {
+    /// Standard audio level display scaling factor.
     static let levelScaleFactor: Float = 3.1
 
+    /// Input level scaled for display (0...1).
     var scaledInputLevel: Float {
         min(1, inputLevel * Self.levelScaleFactor)
     }
 
+    /// Output level scaled for display (0...1).
     var scaledOutputLevel: Float {
         min(1, outputLevel * Self.levelScaleFactor)
     }
 
+    /// The active level based on current phase.
     var activeLevel: Float {
         switch phase {
-        case .listening:
-            return scaledInputLevel
-        case .speaking:
-            return scaledOutputLevel
-        case .thinking, .handoff:
-            return 0.3
-        case .connecting, .error:
-            return 0
+        case .listening:          return scaledInputLevel
+        case .speaking:           return scaledOutputLevel
+        case .thinking, .handoff: return 0.3
+        case .connecting:         return 0
+        case .error:              return 0
         }
     }
+
+    /// Truncated transcript suitable for glanceable display (CarPlay, widgets).
+    func truncatedTranscript(maxLength: Int = 80) -> String? {
+        guard let text = transcriptText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        return text.count > maxLength
+            ? String(text.prefix(maxLength)) + "…"
+            : text
+    }
+}
+
+// MARK: - VoiceActions Protocol
+
+/// Actions for controlling a voice session, consumable by any UI layer.
+@MainActor
+protocol VoiceActions: AnyObject {
+    var activeVoiceSession: VoiceSessionState? { get }
+
+    func startPinnedLocalVoiceCall(
+        cwd: String,
+        model: String?,
+        approvalPolicy: String,
+        sandboxMode: String?
+    ) async throws
+
+    func startVoiceOnThread(_ key: ThreadKey) async throws
+
+    func stopActiveVoiceSession() async
+
+    func toggleActiveVoiceSessionSpeaker() async throws
 }

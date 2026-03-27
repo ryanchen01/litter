@@ -7,9 +7,13 @@ REPO_DIR="$(cd "$IOS_DIR/../.." && pwd)"
 SUBMODULE_DIR="$REPO_DIR/shared/third_party/codex"
 PATCH_FILES=(
     "$REPO_DIR/patches/codex/ios-exec-hook.patch"
-    "$REPO_DIR/patches/codex/realtime-transcript-deltas.patch"
     "$REPO_DIR/patches/codex/client-controlled-handoff.patch"
+    "$REPO_DIR/patches/codex/mobile-code-mode-stub.patch"
 )
+
+patch_already_upstreamed() {
+    return 1
+}
 
 SYNC_MODE="${1:---preserve-current}"
 case "$SYNC_MODE" in
@@ -54,6 +58,8 @@ for PATCH_FILE in "${PATCH_FILES[@]}"; do
     elif git -C "$SUBMODULE_DIR" apply --check "$PATCH_FILE" >/dev/null 2>&1; then
         echo "==> Applying $PATCH_NAME to submodule..."
         git -C "$SUBMODULE_DIR" apply "$PATCH_FILE"
+    elif patch_already_upstreamed "$PATCH_FILE"; then
+        echo "==> $PATCH_NAME already present upstream; skipping patch apply."
     else
         echo "error: $PATCH_NAME no longer applies cleanly to codex $(git -C "$SUBMODULE_DIR" rev-parse --short HEAD)" >&2
         echo "error: refresh $PATCH_FILE before rebuilding the bridge" >&2

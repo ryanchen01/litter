@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.litter.android.core.bridge"
     compileSdk = 35
+    ndkVersion = System.getenv("ANDROID_NDK_VERSION")?.takeIf { it.isNotBlank() } ?: "30.0.14904198"
 
     defaultConfig {
         minSdk = 26
@@ -30,4 +31,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    api("net.java.dev.jna:jna:5.14.0@aar")
 }

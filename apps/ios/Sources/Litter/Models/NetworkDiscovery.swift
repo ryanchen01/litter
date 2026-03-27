@@ -1,15 +1,12 @@
 import Foundation
-import Network
 import Observation
 import UIKit
 
-private let codexDiscoveryPorts: [UInt16] = [8390, 9234, 4222]
-
-private struct DiscoveryCandidate: Hashable {
-    let ip: String
-    let name: String?
-    let source: ServerSource
-    let codexPortHint: UInt16?
+private struct BonjourDiscoverySeed: Hashable {
+    let name: String
+    let host: String
+    let port: UInt16?
+    let serviceType: String
 }
 
 struct TailscalePeerIdentity: Equatable {
@@ -30,15 +27,9 @@ struct TailscaleAvailability: Equatable, Sendable {
     }
 }
 
-enum TailscalePeerParseError: Error {
+enum TailscalePeerParseError: Error, Equatable {
     case unsupportedSurface
     case invalidPayload
-}
-
-private struct CandidateReachability: Sendable {
-    let candidate: DiscoveryCandidate
-    let codexPort: UInt16?
-    let sshPort: UInt16?
 }
 
 private struct TailscaleInterfaceSnapshot: Sendable {
@@ -104,11 +95,18 @@ private actor TailscaleDiscoveryDiagnostics {
 final class NetworkDiscovery {
     var servers: [DiscoveredServer] = []
     var isScanning = false
+    var isInitialLoad = false
     var tailscaleDiscoveryNotice: String?
+    /// Overall scan progress from 0.0 to 1.0.
+    var scanProgress: Float = 0
+    /// Human-readable label for the current scan phase.
+    var scanProgressLabel: String?
 
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var initialLoadTask: Task<Void, Never>?
     @ObservationIgnored private var activeScanID = UUID()
     @ObservationIgnored private var networkServerLastSeen: [String: Date] = [:]
+    @ObservationIgnored private let discoveryStore = DiscoveryBridge()
 
     private let cacheKey = "litter.discovery.networkServers.v1"
     private let cacheRetention: TimeInterval = 7 * 24 * 60 * 60
@@ -118,11 +116,16 @@ final class NetworkDiscovery {
         let name: String
         let hostname: String
         let port: UInt16?
+        let codexPorts: [UInt16]?
         let sshPort: UInt16?
-        let source: String
+        let source: ServerSource
         let hasCodexServer: Bool
         let wakeMAC: String?
+        let preferredConnectionMode: PreferredConnectionMode?
+        let preferredCodexPort: UInt16?
         let lastSeenAt: TimeInterval
+        let os: String?
+        let sshBanner: String?
     }
 
     func startScanning() {
@@ -132,18 +135,28 @@ final class NetworkDiscovery {
         tailscaleDiscoveryNotice = nil
 
         let cachedNetworkServers = loadCachedNetworkServers()
+        let savedNetworkServers = loadSavedNetworkServers()
         let retainedNetworkServers = servers.filter { $0.source != .local }
-        servers = Self.mergeNetworkServers(cachedNetworkServers + retainedNetworkServers)
+        servers = reconcileNetworkServers(cachedNetworkServers + savedNetworkServers + retainedNetworkServers)
         isScanning = true
-        if OnDeviceCodexFeature.isEnabled {
-            servers.append(DiscoveredServer(
-                id: "local",
-                name: UIDevice.current.name,
-                hostname: "127.0.0.1",
-                port: nil,
-                source: .local,
-                hasCodexServer: true
-            ))
+        isInitialLoad = true
+        scanProgress = 0
+        scanProgressLabel = "Discovering services…"
+        servers.append(DiscoveredServer(
+            id: "local",
+            name: UIDevice.current.name,
+            hostname: "127.0.0.1",
+            port: nil,
+            source: .local,
+            hasCodexServer: true
+        ))
+
+        initialLoadTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            await MainActor.run { [weak self] in
+                guard let self, self.activeScanID == scanID else { return }
+                self.isInitialLoad = false
+            }
         }
 
         scanTask = Task.detached(priority: .utility) { [weak self] in
@@ -154,8 +167,11 @@ final class NetworkDiscovery {
 
     func stopScanning() {
         scanTask?.cancel()
+        initialLoadTask?.cancel()
         scanTask = nil
+        initialLoadTask = nil
         isScanning = false
+        isInitialLoad = false
     }
 
     // MARK: - Discovery
@@ -165,6 +181,7 @@ final class NetworkDiscovery {
             Task { @MainActor [weak self] in
                 guard let self, self.activeScanID == scanID else { return }
                 self.isScanning = false
+                self.isInitialLoad = false
             }
         }
         guard !Task.isCancelled else { return }
@@ -174,191 +191,175 @@ final class NetworkDiscovery {
         }
         guard isCurrent else { return }
 
-        let localIPv4 = Self.localIPv4Address()?.0
-        var cumulativeCandidates: [DiscoveryCandidate] = []
+        let store = await MainActor.run { [weak self] in self?.discoveryStore }
+        guard let store else { return }
+
         let tailscaleDiagnostics = TailscaleDiscoveryDiagnostics()
         let tailscaleAppInstalled = await MainActor.run { Self.isTailscaleAppInstalled() }
+        async let tailscaleNoticeProbe: Void = Self.probeTailscaleDiscoveryNotice(
+            timeout: 1.0,
+            appInstalled: tailscaleAppInstalled,
+            diagnostics: tailscaleDiagnostics
+        )
 
-        // Run two passes to reduce discovery misses from transient Bonjour/Tailscale timing.
-        // Within each pass, stream source results and probe completions progressively so
-        // DiscoveryView can render rows as soon as they are found.
-        for pass in 0..<2 {
-            let bonjourTimeout: TimeInterval = pass == 0 ? 5.0 : 3.0
-            let tailscaleTimeout: TimeInterval = pass == 0 ? 1.0 : 0.75
-            let probeTimeout: TimeInterval = pass == 0 ? 1.0 : 1.4
-            let probeAttempts = pass == 0 ? 2 : 3
+        let seeds = await Self.discoverBonjourSeeds(timeout: 5.0)
+        let localIPv4 = Self.localIPv4Address()?.0
+        guard !Task.isCancelled else { return }
 
-            var passCandidates = cumulativeCandidates
-            var probedIPs = Set<String>()
-            var passReachable: [CandidateReachability] = []
+        await MainActor.run { [weak self] in
+            guard let self, self.activeScanID == scanID else { return }
+            self.scanProgress = 0.02
+            self.scanProgressLabel = "Scanning network…"
+        }
 
-            func probePendingCandidates() async {
-                let pending = passCandidates.filter { candidate in
-                    probedIPs.insert(candidate.ip).inserted
+        let subscription = store.scanServersWithMdnsContextProgressive(
+            seeds: seeds.map {
+                FfiMdnsSeed(name: $0.name, host: $0.host, port: $0.port, serviceType: $0.serviceType)
+            },
+            localIpv4: localIPv4
+        )
+
+        do {
+            while !Task.isCancelled {
+                let update = try await subscription.nextEvent()
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.activeScanID == scanID else { return }
+                    self.isInitialLoad = false
+                    self.applyRustDiscoveryResults(update.servers)
+                    self.scanProgress = update.progress
+                    self.scanProgressLabel = update.progressLabel
                 }
-                guard !pending.isEmpty else { return }
-
-                let reachable = await Self.filterCandidatesWithOpenServices(
-                    pending,
-                    timeout: probeTimeout,
-                    attempts: probeAttempts,
-                    onReachable: { state in
-                        Task { @MainActor [weak self] in
-                            guard let self, self.activeScanID == scanID else { return }
-                            self.applyReachabilityResults([state])
-                        }
-                    }
-                )
-                passReachable.append(contentsOf: reachable)
-            }
-
-            await withTaskGroup(of: [DiscoveryCandidate].self) { group in
-                group.addTask { await Self.discoverBonjourCandidates(timeout: bonjourTimeout) }
-                group.addTask {
-                    await Self.discoverTailscaleSSHCandidates(
-                        timeout: tailscaleTimeout,
-                        appInstalled: tailscaleAppInstalled,
-                        diagnostics: tailscaleDiagnostics
-                    )
-                }
-                group.addTask {
-                    await Self.discoverLocalSubnetCodexCandidates(
-                        localIPv4: localIPv4,
-                        timeout: pass == 0 ? 0.24 : 0.34,
-                        attempts: pass == 0 ? 1 : 2
-                    )
-                }
-
-                while let sourceCandidates = await group.next() {
-                    guard !Task.isCancelled else { return }
-                    let shouldContinue = await MainActor.run { [weak self] in
-                        guard let self else { return false }
-                        return self.activeScanID == scanID
-                    }
-                    guard shouldContinue else { return }
-
-                    let merged = Self.mergeCandidates(sourceCandidates, excluding: localIPv4)
-                    cumulativeCandidates = Self.mergeCandidates(cumulativeCandidates + merged, excluding: localIPv4)
-                    passCandidates = Self.mergeCandidates(passCandidates + merged, excluding: localIPv4)
-
-                    await probePendingCandidates()
+                if update.kind == .scanComplete {
+                    break
                 }
             }
-
-            let tailscaleNotice = await tailscaleDiagnostics.notice
-            await MainActor.run { [weak self] in
-                guard let self, self.activeScanID == scanID else { return }
-                self.tailscaleDiscoveryNotice = tailscaleNotice
-            }
-
-            // Re-probe any candidates carried over from previous pass that were not
-            // exercised in this pass to improve reliability after transient failures.
-            await probePendingCandidates()
-
+        } catch {
             guard !Task.isCancelled else { return }
-            let shouldApply = await MainActor.run { [weak self] in
-                guard let self else { return false }
-                return self.activeScanID == scanID
-            }
-            guard shouldApply else { return }
-            let passReachableSnapshot = passReachable
-            await MainActor.run { [weak self] in
-                guard let self, self.activeScanID == scanID else { return }
-                self.applyReachabilityResults(passReachableSnapshot)
-            }
+        }
 
-            if pass == 0 {
-                try? await Task.sleep(for: .milliseconds(700))
-            }
+        _ = await tailscaleNoticeProbe
+        let tailscaleNotice = await tailscaleDiagnostics.notice
+        await MainActor.run { [weak self] in
+            guard let self, self.activeScanID == scanID else { return }
+            self.tailscaleDiscoveryNotice = tailscaleNotice
         }
     }
 
-    private func applyReachabilityResults(_ reachable: [CandidateReachability]) {
-        guard !reachable.isEmpty else { return }
+    private func applyRustDiscoveryResults(_ discovered: [FfiDiscoveredServer]) {
         let now = Date()
-        for state in reachable.sorted(by: { Self.candidateSortOrder(lhs: $0.candidate, rhs: $1.candidate) }) {
-            let candidate = state.candidate
-            let id = "network-\(candidate.ip)"
-            networkServerLastSeen[id] = now
-            let discovered = DiscoveredServer(
-                id: id,
-                name: candidate.name ?? candidate.ip,
-                hostname: candidate.ip,
-                port: state.codexPort,
-                sshPort: state.sshPort,
-                source: candidate.source,
-                hasCodexServer: state.codexPort != nil,
-                wakeMAC: servers.first(where: { $0.id == id })?.wakeMAC
-            )
-
-            if let index = servers.firstIndex(where: { $0.id == id }) {
-                let existing = servers[index]
-                let preferredSource = Self.sourceRank(candidate.source) <= Self.sourceRank(existing.source)
-                    ? candidate.source
-                    : existing.source
-                let preferredName = (existing.name == existing.hostname) && (discovered.name != discovered.hostname)
-                    ? discovered.name
-                    : existing.name
-                servers[index] = DiscoveredServer(
-                    id: existing.id,
-                    name: preferredName,
-                    hostname: discovered.hostname,
-                    port: discovered.port,
-                    sshPort: discovered.sshPort ?? existing.sshPort,
-                    source: preferredSource,
-                    hasCodexServer: discovered.hasCodexServer,
-                    wakeMAC: existing.wakeMAC ?? discovered.wakeMAC,
-                    sshPortForwardingEnabled: existing.sshPortForwardingEnabled
-                )
-            } else {
-                servers.append(discovered)
-            }
+        let metadataSources = loadSavedNetworkServers() + servers.filter { $0.source != .local }
+        var existingByKey: [String: DiscoveredServer] = [:]
+        for server in metadataSources {
+            existingByKey[server.deduplicationKey] = server
         }
+        let resolved = discovered.compactMap { rust -> DiscoveredServer? in
+            let existing = existingByKey[Self.normalizedServerKey(for: rust.host)]
+            guard let server = Self.discoveredServer(from: rust, existing: existing) else {
+                return nil
+            }
+            networkServerLastSeen[server.id] = now
+            return server
+        }
+
+        let local = servers.filter { $0.source == .local }
+        servers = local + reconcileNetworkServers(resolved + metadataSources)
         saveCachedNetworkServers()
     }
 
-    nonisolated private static func candidateSortOrder(lhs: DiscoveryCandidate, rhs: DiscoveryCandidate) -> Bool {
-        let leftRank = sourceRank(lhs.source)
-        let rightRank = sourceRank(rhs.source)
-        if leftRank != rightRank {
-            return leftRank < rightRank
-        }
-        let leftName = lhs.name ?? lhs.ip
-        let rightName = rhs.name ?? rhs.ip
-        return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+    private static func discoveredServer(
+        from rust: FfiDiscoveredServer,
+        existing: DiscoveredServer?
+    ) -> DiscoveredServer? {
+        let host = rust.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, host != "127.0.0.1" else { return nil }
+
+        let id = rust.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = rust.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DiscoveredServer(
+            id: id.isEmpty ? "network-\(host)" : id,
+            name: name.isEmpty ? host : name,
+            hostname: host,
+            port: rust.codexPort,
+            codexPorts: rust.codexPorts,
+            sshPort: rust.sshPort,
+            source: ServerSource(rust.source),
+            hasCodexServer: rust.codexPort != nil || !rust.codexPorts.isEmpty,
+            wakeMAC: existing?.wakeMAC,
+            sshPortForwardingEnabled: false,
+            websocketURL: existing?.websocketURL,
+            preferredConnectionMode: existing?.preferredConnectionMode,
+            preferredCodexPort: existing?.preferredCodexPort,
+            os: rust.sshBanner != nil ? rust.os : (rust.os ?? existing?.os),
+            sshBanner: rust.sshBanner ?? existing?.sshBanner
+        )
     }
 
-    nonisolated private static func sourceRank(_ source: ServerSource) -> Int {
-        switch source {
-        case .bonjour: return 0
-        case .tailscale: return 1
-        default: return 2
+    private func reconcileNetworkServers(_ candidates: [DiscoveredServer]) -> [DiscoveredServer] {
+        var existingByKey: [String: DiscoveredServer] = [:]
+        for server in candidates where server.source != .local {
+            existingByKey[server.deduplicationKey] = server
         }
+        return discoveryStore
+            .reconcileServers(
+                candidates: candidates
+                    .filter { $0.source != .local }
+                    .map(Self.ffiDiscoveredServer(from:))
+            )
+            .compactMap { rust in
+                Self.discoveredServer(
+                    from: rust,
+                    existing: existingByKey[Self.normalizedServerKey(for: rust.host)]
+                )
+            }
     }
 
-    private static func mergeNetworkServers(_ candidates: [DiscoveredServer]) -> [DiscoveredServer] {
-        var merged: [String: DiscoveredServer] = [:]
-        for candidate in candidates where candidate.source != .local {
-            if let existing = merged[candidate.id] {
-                let betterSource = sourceRank(candidate.source) < sourceRank(existing.source)
-                let hasCodexUpgrade = candidate.hasCodexServer && !existing.hasCodexServer
-                let betterCodexPort = candidate.hasCodexServer && existing.hasCodexServer && candidate.port != existing.port
-                let betterName = existing.name == existing.hostname && candidate.name != candidate.hostname
-                if betterSource || hasCodexUpgrade || betterCodexPort || betterName {
-                    merged[candidate.id] = candidate
+    private func loadSavedNetworkServers() -> [DiscoveredServer] {
+        SavedServerStore.load()
+            .map { $0.toDiscoveredServer() }
+            .filter { $0.source != .local }
+    }
+
+    private static func normalizedServerKey(for host: String) -> String {
+        var normalized = host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .replacingOccurrences(of: "%25", with: "%")
+
+        if !normalized.contains(":"), let scopeIndex = normalized.firstIndex(of: "%") {
+            normalized = String(normalized[..<scopeIndex])
+        }
+
+        return normalized.lowercased()
+    }
+
+    private static func ffiDiscoveredServer(from server: DiscoveredServer) -> FfiDiscoveredServer {
+        FfiDiscoveredServer(
+            id: server.id,
+            displayName: server.name,
+            host: server.hostname,
+            port: server.port ?? server.resolvedSSHPort,
+            codexPort: server.port,
+            codexPorts: server.codexPorts,
+            sshPort: server.sshPort,
+            source: {
+                switch server.source {
+                case .local:
+                    return .local
+                case .bonjour:
+                    return .bonjour
+                case .ssh:
+                    return .manual
+                case .tailscale:
+                    return .tailscale
+                case .manual:
+                    return .manual
                 }
-            } else {
-                merged[candidate.id] = candidate
-            }
-        }
-        return Array(merged.values).sorted { lhs, rhs in
-            let lhsRank = sourceRank(lhs.source)
-            let rhsRank = sourceRank(rhs.source)
-            if lhsRank != rhsRank {
-                return lhsRank < rhsRank
-            }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
+            }(),
+            reachable: server.hasCodexServer || server.sshPort != nil,
+            os: server.os,
+            sshBanner: server.sshBanner
+        )
     }
 
     private func loadCachedNetworkServers() -> [DiscoveredServer] {
@@ -377,18 +378,22 @@ final class NetworkDiscovery {
 
         for entry in cached {
             guard now.timeIntervalSince1970 - entry.lastSeenAt <= maxAge else { continue }
-            let source = ServerSource.from(entry.source)
-            guard source != .local else { continue }
-                let server = DiscoveredServer(
-                    id: entry.id,
-                    name: entry.name,
-                    hostname: entry.hostname,
-                    port: entry.port,
-                    sshPort: entry.sshPort,
-                    source: source,
-                    hasCodexServer: entry.hasCodexServer,
-                    wakeMAC: entry.wakeMAC
-                )
+            guard entry.source != .local else { continue }
+            let server = DiscoveredServer(
+                id: entry.id,
+                name: entry.name,
+                hostname: entry.hostname,
+                port: entry.port,
+                codexPorts: entry.codexPorts ?? (entry.port.map { [ $0 ] } ?? []),
+                sshPort: entry.sshPort,
+                source: entry.source,
+                hasCodexServer: entry.hasCodexServer,
+                wakeMAC: entry.wakeMAC,
+                preferredConnectionMode: entry.preferredConnectionMode,
+                preferredCodexPort: entry.preferredCodexPort,
+                os: entry.os,
+                sshBanner: entry.sshBanner
+            )
             loaded.append(server)
             pruned.append(entry)
             networkServerLastSeen[entry.id] = Date(timeIntervalSince1970: entry.lastSeenAt)
@@ -412,11 +417,16 @@ final class NetworkDiscovery {
                     name: server.name,
                     hostname: server.hostname,
                     port: server.port,
+                    codexPorts: server.codexPorts,
                     sshPort: server.sshPort,
-                    source: server.source.rawString,
+                    source: server.source,
                     hasCodexServer: server.hasCodexServer,
                     wakeMAC: server.wakeMAC,
-                    lastSeenAt: lastSeen.timeIntervalSince1970
+                    preferredConnectionMode: server.preferredConnectionMode,
+                    preferredCodexPort: server.preferredCodexPort,
+                    lastSeenAt: lastSeen.timeIntervalSince1970,
+                    os: server.os,
+                    sshBanner: server.sshBanner
                 )
             }
         persistCachedNetworkServers(cached)
@@ -428,179 +438,23 @@ final class NetworkDiscovery {
         UserDefaults.standard.set(data, forKey: cacheKey)
     }
 
-    nonisolated private static func mergeCandidates(
-        _ candidates: [DiscoveryCandidate],
-        excluding localIPv4: String?
-    ) -> [DiscoveryCandidate] {
-        var merged: [String: DiscoveryCandidate] = [:]
-        for candidate in candidates {
-            guard isIPv4Address(candidate.ip), candidate.ip != localIPv4 else { continue }
-            if let existing = merged[candidate.ip] {
-                let useCandidateSource = sourceRank(candidate.source) < sourceRank(existing.source)
-                let resolvedName = existing.name ?? candidate.name
-                let resolvedSource = useCandidateSource ? candidate.source : existing.source
-                let resolvedPortHint = existing.codexPortHint ?? candidate.codexPortHint
-                merged[candidate.ip] = DiscoveryCandidate(
-                    ip: candidate.ip,
-                    name: resolvedName,
-                    source: resolvedSource,
-                    codexPortHint: resolvedPortHint
-                )
-            } else {
-                merged[candidate.ip] = candidate
-            }
-        }
-        return Array(merged.values)
-    }
-
-    nonisolated private static func isPortOpenOnce(host: String, port: UInt16, timeout: TimeInterval) async -> Bool {
-        await withCheckedContinuation { cont in
-            let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
-            let resumed = LockedFlag()
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if resumed.setTrue() {
-                        connection.stateUpdateHandler = nil
-                        connection.cancel()
-                        cont.resume(returning: true)
-                    }
-                case .failed, .cancelled:
-                    if resumed.setTrue() {
-                        connection.stateUpdateHandler = nil
-                        connection.cancel()
-                        cont.resume(returning: false)
-                    }
-                default:
-                    break
-                }
-            }
-            connection.start(queue: .global(qos: .utility))
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if resumed.setTrue() {
-                    connection.stateUpdateHandler = nil
-                    connection.cancel()
-                    cont.resume(returning: false)
-                }
-            }
-        }
-    }
-
-    nonisolated private static func isPortOpen(
-        host: String,
-        port: UInt16,
-        timeout: TimeInterval,
-        attempts: Int
-    ) async -> Bool {
-        let retries = max(1, attempts)
-        for attempt in 0..<retries {
-            if await isPortOpenOnce(host: host, port: port, timeout: timeout) {
-                return true
-            }
-            if attempt < retries - 1 {
-                try? await Task.sleep(for: .milliseconds(180))
-            }
-        }
-        return false
-    }
-
-    nonisolated private static func filterCandidatesWithOpenServices(
-        _ candidates: [DiscoveryCandidate],
-        timeout: TimeInterval,
-        attempts: Int,
-        onReachable: (@Sendable (CandidateReachability) -> Void)? = nil
-    ) async -> [CandidateReachability] {
-        await withTaskGroup(of: CandidateReachability?.self) { group in
-            for candidate in candidates {
-                group.addTask {
-                    let hasSSH = await isPortOpen(
-                        host: candidate.ip,
-                        port: 22,
-                        timeout: timeout,
-                        attempts: attempts
-                    )
-                    var codexPort: UInt16?
-                    if let hint = candidate.codexPortHint {
-                        if await isPortOpen(
-                            host: candidate.ip,
-                            port: hint,
-                            timeout: timeout,
-                            attempts: attempts
-                        ) {
-                            codexPort = hint
-                        }
-                    }
-                    for port in codexDiscoveryPorts {
-                        if codexPort != nil { break }
-                        if await isPortOpen(
-                            host: candidate.ip,
-                            port: port,
-                            timeout: timeout,
-                            attempts: attempts
-                        ) {
-                            codexPort = port
-                            break
-                        }
-                    }
-                    // Bonjour hosts can expose app-server shortly after service resolution;
-                    // give codex ports one longer retry window before classifying as SSH-only.
-                    if codexPort == nil, candidate.source == .bonjour {
-                        for port in codexDiscoveryPorts {
-                            if await isPortOpen(
-                                host: candidate.ip,
-                                port: port,
-                                timeout: max(0.8, timeout * 1.9),
-                                attempts: attempts + 1
-                            ) {
-                                codexPort = port
-                                break
-                            }
-                        }
-                    }
-
-                    // Bonjour records are already service-level signals; keep them even when probes flake.
-                    let includeOnBonjourSignal = candidate.source == .bonjour
-                    guard hasSSH || codexPort != nil || includeOnBonjourSignal else {
-                        return nil
-                    }
-                    return CandidateReachability(
-                        candidate: candidate,
-                        codexPort: codexPort,
-                        sshPort: hasSSH ? 22 : nil
-                    )
-                }
-            }
-            var reachable: [CandidateReachability] = []
-            for await state in group {
-                if let state {
-                    reachable.append(state)
-                    onReachable?(state)
-                }
-            }
-            return reachable
-        }
-    }
-
-    private static func discoverBonjourCandidates(timeout: TimeInterval) async -> [DiscoveryCandidate] {
-        async let ssh = discoverBonjourCandidates(
+    private static func discoverBonjourSeeds(timeout: TimeInterval) async -> [BonjourDiscoverySeed] {
+        async let ssh = discoverBonjourSeeds(
             serviceType: "_ssh._tcp.",
-            timeout: timeout,
-            codexService: false
+            timeout: timeout
         )
-        async let codex = discoverBonjourCandidates(
+        async let codex = discoverBonjourSeeds(
             serviceType: "_codex._tcp.",
-            timeout: timeout,
-            codexService: true
+            timeout: timeout
         )
-        return mergeCandidates(Array((await ssh) + (await codex)), excluding: nil)
+        return Array((await ssh) + (await codex))
     }
 
-    private static func discoverBonjourCandidates(
+    private static func discoverBonjourSeeds(
         serviceType: String,
-        timeout: TimeInterval,
-        codexService: Bool
-    ) async -> [DiscoveryCandidate] {
-        let browser = BonjourServiceDiscoverer(serviceType: serviceType, codexService: codexService)
+        timeout: TimeInterval
+    ) async -> [BonjourDiscoverySeed] {
+        let browser = BonjourServiceDiscoverer(serviceType: serviceType)
         return await browser.discover(timeout: timeout)
     }
 
@@ -664,13 +518,13 @@ final class NetworkDiscovery {
         return "Tailscale peer discovery is unavailable right now. Add a server manually with its MagicDNS name or Tailscale IP. Saved servers will still appear here."
     }
 
-    nonisolated private static func discoverTailscaleSSHCandidates(
+    nonisolated private static func probeTailscaleDiscoveryNotice(
         timeout: TimeInterval,
         appInstalled: Bool,
         diagnostics: TailscaleDiscoveryDiagnostics
-    ) async -> [DiscoveryCandidate] {
+    ) async {
         guard let url = URL(string: "http://100.100.100.100/localapi/v0/status") else {
-            return []
+            return
         }
 
         let interfaceSnapshot = tailscaleInterfaceSnapshot()
@@ -705,14 +559,9 @@ final class NetworkDiscovery {
             let peers = try parseTailscalePeerCandidates(data: data, response: response)
             await diagnostics.markSuccess()
             NSLog("[tailscale] got %d peers", peers.count)
-            let candidates = peers.map {
-                DiscoveryCandidate(ip: $0.ip, name: $0.name, source: .tailscale, codexPortHint: nil)
-            }
-            NSLog("[tailscale] returning %d candidates", candidates.count)
-            return candidates
         } catch {
             let responsePreview = (error as NSError).localizedDescription
-            if let notice = tailscaleDiscoveryNotice(for: error, availability: availability) {
+            if let notice = Self.tailscaleDiscoveryNotice(for: error, availability: availability) {
                 await diagnostics.record(notice)
             } else {
                 NSLog("[tailscale] suppressing notice because Tailscale does not look installed or active")
@@ -720,66 +569,12 @@ final class NetworkDiscovery {
             NSLog("[tailscale] request error: %@", responsePreview)
             NSLog("[tailscale] interface snapshot after error: %@", tailscaleInterfaceSnapshot().logDescription)
         }
-        return []
     }
 
     @MainActor
     private static func isTailscaleAppInstalled() -> Bool {
         guard let url = URL(string: "tailscale://") else { return false }
         return UIApplication.shared.canOpenURL(url)
-    }
-
-    nonisolated private static func discoverLocalSubnetCodexCandidates(
-        localIPv4: String?,
-        timeout: TimeInterval,
-        attempts: Int
-    ) async -> [DiscoveryCandidate] {
-        guard let localIPv4 else { return [] }
-        let parts = localIPv4.split(separator: ".")
-        guard parts.count == 4 else { return [] }
-        guard let lastOctet = Int(parts[3]) else { return [] }
-
-        let subnetPrefix = "\(parts[0]).\(parts[1]).\(parts[2])."
-        let hosts: [Int] = (1...254).filter { $0 != lastOctet }
-        var found: [DiscoveryCandidate] = []
-
-        let batchSize = 28
-        for start in stride(from: 0, to: hosts.count, by: batchSize) {
-            let batch = hosts[start..<min(start + batchSize, hosts.count)]
-            let batchResults: [DiscoveryCandidate] = await withTaskGroup(of: DiscoveryCandidate?.self) { group in
-                for host in batch {
-                    group.addTask {
-                        let ip = "\(subnetPrefix)\(host)"
-                        for port in codexDiscoveryPorts {
-                            if await isPortOpen(
-                                host: ip,
-                                port: port,
-                                timeout: timeout,
-                                attempts: attempts
-                            ) {
-                                return DiscoveryCandidate(
-                                    ip: ip,
-                                    name: nil,
-                                    source: .bonjour,
-                                    codexPortHint: port
-                                )
-                            }
-                        }
-                        return nil
-                    }
-                }
-
-                var results: [DiscoveryCandidate] = []
-                for await candidate in group {
-                    if let candidate {
-                        results.append(candidate)
-                    }
-                }
-                return results
-            }
-            found.append(contentsOf: batchResults)
-        }
-        return found
     }
 
     nonisolated private static func cleanedHostName(_ value: String?) -> String? {
@@ -963,27 +758,25 @@ final class NetworkDiscovery {
 private final class BonjourServiceDiscoverer: NSObject, @preconcurrency NetServiceBrowserDelegate, @preconcurrency NetServiceDelegate {
     private struct ServiceRecord {
         let name: String
-        let codexPortHint: UInt16?
+        let port: UInt16?
     }
 
     private let serviceType: String
-    private let codexService: Bool
     private let browser = NetServiceBrowser()
     private var services: [NetService] = []
     private var results: [String: ServiceRecord] = [:]
     private var pendingServices: Set<ObjectIdentifier> = []
-    private var continuation: CheckedContinuation<[DiscoveryCandidate], Never>?
+    private var continuation: CheckedContinuation<[BonjourDiscoverySeed], Never>?
     private var timeoutTask: Task<Void, Never>?
     private var resolveDrainTask: Task<Void, Never>?
     private var isFinished = false
     private var requestedStop = false
 
-    init(serviceType: String, codexService: Bool) {
+    init(serviceType: String) {
         self.serviceType = serviceType
-        self.codexService = codexService
     }
 
-    func discover(timeout: TimeInterval) async -> [DiscoveryCandidate] {
+    func discover(timeout: TimeInterval) async -> [BonjourDiscoverySeed] {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
             browser.delegate = self
@@ -1027,7 +820,12 @@ private final class BonjourServiceDiscoverer: NSObject, @preconcurrency NetServi
             service.delegate = nil
         }
         let discovered = results.map {
-            DiscoveryCandidate(ip: $0.key, name: $0.value.name, source: .bonjour, codexPortHint: $0.value.codexPortHint)
+            BonjourDiscoverySeed(
+                name: $0.value.name,
+                host: $0.key,
+                port: $0.value.port,
+                serviceType: serviceType
+            )
         }
         continuation?.resume(returning: discovered)
         continuation = nil
@@ -1058,14 +856,13 @@ private final class BonjourServiceDiscoverer: NSObject, @preconcurrency NetServi
     func netServiceDidResolveAddress(_ sender: NetService) {
         pendingServices.remove(ObjectIdentifier(sender))
         guard let addresses = sender.addresses else { return }
-        let codexPort: UInt16? = {
-            guard codexService else { return nil }
-            guard sender.port > 0, sender.port <= Int(UInt16.max) else { return 8390 }
+        let resolvedPort: UInt16? = {
+            guard sender.port > 0, sender.port <= Int(UInt16.max) else { return nil }
             return UInt16(sender.port)
         }()
         for address in addresses {
             guard let ip = NetworkDiscovery.ipv4Address(fromSockaddrData: address) else { continue }
-            results[ip] = ServiceRecord(name: sender.name, codexPortHint: codexPort)
+            results[ip] = ServiceRecord(name: sender.name, port: resolvedPort)
             break
         }
         if requestedStop, pendingServices.isEmpty {
@@ -1078,19 +875,5 @@ private final class BonjourServiceDiscoverer: NSObject, @preconcurrency NetServi
         if requestedStop, pendingServices.isEmpty {
             finish()
         }
-    }
-}
-
-/// Thread-safe flag for one-shot continuation resumption.
-private final class LockedFlag: @unchecked Sendable {
-    private var value = false
-    private let lock = NSLock()
-    /// Returns `true` the first time it's called; `false` thereafter.
-    func setTrue() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if value { return false }
-        value = true
-        return true
     }
 }

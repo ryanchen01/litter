@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct RealtimeVoiceScreen: View {
-    let serverManager: ServerManager
+    @Environment(AppModel.self) private var appModel
+    @Environment(VoiceRuntimeController.self) private var voiceRuntime
     let threadKey: ThreadKey
     let onEnd: () -> Void
     let onToggleSpeaker: () -> Void
@@ -10,16 +11,17 @@ struct RealtimeVoiceScreen: View {
     @State private var apiKey = ""
     @State private var isSavingApiKey = false
     @State private var hasCheckedAuth = false
+    @State private var hasStoredApiKey = OpenAIApiKeyStore.shared.hasStoredKey
     @State private var apiKeyError: String?
     @State private var isRetryingAfterAuthSave = false
     private var session: VoiceSessionState? {
-        guard let session = serverManager.activeVoiceSession,
+        guard let session = voiceRuntime.activeVoiceSession,
               session.threadKey == threadKey else { return nil }
         return session
     }
 
-    private var connection: ServerConnection? {
-        serverManager.connections[threadKey.serverId]
+    private var server: AppServerSnapshot? {
+        appModel.snapshot?.serverSnapshot(for: threadKey.serverId)
     }
 
     private var phase: VoiceSessionPhase {
@@ -59,25 +61,47 @@ struct RealtimeVoiceScreen: View {
         } ?? []
     }
 
+    private var visibleTranscriptEntries: [VoiceSessionTranscriptEntry] {
+        var entries = transcriptHistory
+        guard let session else { return entries }
+
+        let liveText = session.transcriptText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !liveText.isEmpty else { return entries }
+
+        let speaker = session.transcriptSpeaker?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? session.transcriptSpeaker!
+            : (session.phase == .speaking ? "Codex" : "You")
+        let liveId = session.transcriptLiveMessageID ?? "live-\(speaker.lowercased())"
+        let timestamp = entries.first(where: { $0.id == liveId })?.timestamp ?? Date()
+        let entry = VoiceSessionTranscriptEntry(
+            id: liveId,
+            speaker: speaker,
+            text: liveText,
+            timestamp: timestamp
+        )
+
+        if let existingIndex = entries.firstIndex(where: { $0.id == liveId }) {
+            entries[existingIndex] = entry
+        } else {
+            entries.append(entry)
+        }
+        return entries
+    }
+
     private var transcriptScrollSignature: String? {
-        guard let last = transcriptHistory.last else { return nil }
+        guard let last = visibleTranscriptEntries.last else { return nil }
         return "\(last.id):\(last.text.count)"
     }
 
     private var shouldShowApiKeyPrompt: Bool {
         guard hasCheckedAuth,
-              let connection,
-              phase == .connecting else {
+              let server,
+              server.isLocal,
+              phase == .connecting,
+              !hasStoredApiKey else {
             return false
         }
-        switch connection.authStatus {
-        case .chatgpt:
-            return !connection.hasOpenAIApiKey
-        case .notLoggedIn:
-            return !connection.hasOpenAIApiKey
-        case .apiKey, .unknown:
-            return false
-        }
+        return true
     }
 
     private var trimmedApiKey: String {
@@ -105,7 +129,6 @@ struct RealtimeVoiceScreen: View {
                 if let handoffThreadKey {
                     InlineHandoffView(
                         threadKey: handoffThreadKey,
-                        serverManager: serverManager,
                         maxHeight: 220
                     )
                     .padding(.horizontal, 18)
@@ -126,11 +149,23 @@ struct RealtimeVoiceScreen: View {
         }
         .statusBarHidden()
         .task {
-            guard let connection else { return }
-            await connection.checkAuth()
-            await MainActor.run {
-                hasCheckedAuth = true
-                apiKeyError = connection.lastAuthError
+            do {
+                _ = try await appModel.rpc.getAccount(
+                    serverId: threadKey.serverId,
+                    params: GetAccountParams(refreshToken: false)
+                )
+                await appModel.refreshSnapshot()
+                await MainActor.run {
+                    hasCheckedAuth = true
+                    hasStoredApiKey = OpenAIApiKeyStore.shared.hasStoredKey
+                    apiKeyError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    hasCheckedAuth = true
+                    hasStoredApiKey = OpenAIApiKeyStore.shared.hasStoredKey
+                    apiKeyError = error.localizedDescription
+                }
             }
         }
         .onChange(of: session?.id) { _, next in
@@ -157,7 +192,7 @@ struct RealtimeVoiceScreen: View {
                     .tracking(2)
             }
 
-            if transcriptHistory.isEmpty {
+            if visibleTranscriptEntries.isEmpty {
                 AudioWaveformView(
                     level: Float(phase == .listening ? inputLevel : outputLevel),
                     tint: phaseColor
@@ -169,11 +204,11 @@ struct RealtimeVoiceScreen: View {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical, showsIndicators: false) {
                             VStack(spacing: 18) {
-                                ForEach(Array(transcriptHistory.enumerated()), id: \.element.id) { index, entry in
+                                ForEach(Array(visibleTranscriptEntries.enumerated()), id: \.element.id) { index, entry in
                                     transcriptLine(
                                         entry,
                                         isLive: false,
-                                        recencyIndex: transcriptHistory.count - index - 1
+                                        recencyIndex: visibleTranscriptEntries.count - index - 1
                                     )
                                     .id(entry.id)
                                 }
@@ -182,7 +217,7 @@ struct RealtimeVoiceScreen: View {
                             .frame(minHeight: geometry.size.height, alignment: .center)
                         }
                         .onChange(of: transcriptScrollSignature) { _, _ in
-                            guard let next = transcriptHistory.last?.id else { return }
+                            guard let next = visibleTranscriptEntries.last?.id else { return }
                             withAnimation(.easeOut(duration: 0.18)) {
                                 proxy.scrollTo(next, anchor: .bottom)
                             }
@@ -261,7 +296,7 @@ struct RealtimeVoiceScreen: View {
                 .font(LitterFont.styled(.headline, weight: .semibold))
                 .foregroundColor(.white)
 
-            Text("Enter your OpenAI API key to enable realtime voice on this device. If you are logged in with ChatGPT, that login stays active and this key is saved alongside it for realtime.")
+            Text("Enter your OpenAI API key for this device. Litter will store it in the local Codex environment as OPENAI_API_KEY.")
                 .font(LitterFont.styled(.caption))
                 .foregroundColor(.white.opacity(0.78))
                 .fixedSize(horizontal: false, vertical: true)
@@ -300,27 +335,47 @@ struct RealtimeVoiceScreen: View {
     }
 
     private func saveApiKeyAndRetry() {
-        guard let connection else { return }
         guard !trimmedApiKey.isEmpty, !isSavingApiKey else { return }
+        guard server?.isLocal == true else {
+            apiKeyError = "API keys are only saved on the local server."
+            return
+        }
 
         isSavingApiKey = true
         apiKeyError = nil
 
         Task {
-            await connection.saveOpenAIApiKey(trimmedApiKey)
-            await connection.checkAuth()
-
-            let apiKeySaved = connection.hasOpenAIApiKey
-            let authError = connection.lastAuthError
+            var apiKeySaved = false
+            var authError: String?
+            do {
+                try OpenAIApiKeyStore.shared.save(trimmedApiKey)
+                if case .apiKey? = server?.account {
+                    _ = try await appModel.rpc.logoutAccount(serverId: threadKey.serverId)
+                }
+                await voiceRuntime.stopActiveVoiceSession()
+                try await appModel.restartLocalServer()
+                let persisted = OpenAIApiKeyStore.shared.hasStoredKey
+                guard persisted else {
+                    authError = "API key did not persist locally."
+                    throw CancellationError()
+                }
+                apiKeySaved = true
+                authError = nil
+            } catch {
+                apiKeySaved = false
+                if authError == nil {
+                    authError = error.localizedDescription
+                }
+            }
 
             if apiKeySaved {
                 await MainActor.run {
                     isRetryingAfterAuthSave = true
                 }
-                await serverManager.stopActiveVoiceSession()
+                await voiceRuntime.stopActiveVoiceSession()
                 try? await Task.sleep(for: .milliseconds(150))
                 do {
-                    try await serverManager.startVoiceOnThread(threadKey)
+                    try await voiceRuntime.startVoiceOnThread(threadKey)
                 } catch {
                     await MainActor.run {
                         isRetryingAfterAuthSave = false
@@ -333,6 +388,7 @@ struct RealtimeVoiceScreen: View {
                 isSavingApiKey = false
                 hasCheckedAuth = true
                 if apiKeySaved {
+                    hasStoredApiKey = true
                     apiKey = ""
                 }
                 if !apiKeySaved {
@@ -345,32 +401,22 @@ struct RealtimeVoiceScreen: View {
 
     @ViewBuilder
     private var apiKeySaveButton: some View {
-        if #available(iOS 26.0, *) {
-            Button {
-                saveApiKeyAndRetry()
-            } label: {
-                apiKeySaveButtonLabel
-            }
-            .buttonStyle(.glassProminent)
-            .disabled(trimmedApiKey.isEmpty || isSavingApiKey)
-        } else {
-            Button {
-                saveApiKeyAndRetry()
-            } label: {
-                apiKeySaveButtonLabel
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.12))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(trimmedApiKey.isEmpty || isSavingApiKey)
-            .opacity(trimmedApiKey.isEmpty || isSavingApiKey ? 0.55 : 1)
+        Button {
+            saveApiKeyAndRetry()
+        } label: {
+            apiKeySaveButtonLabel
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
         }
+        .buttonStyle(.plain)
+        .disabled(trimmedApiKey.isEmpty || isSavingApiKey)
+        .opacity(trimmedApiKey.isEmpty || isSavingApiKey ? 0.55 : 1)
     }
 
     private var apiKeySaveButtonLabel: some View {

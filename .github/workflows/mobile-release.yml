@@ -260,7 +260,7 @@ jobs:
       - name: Prime sccache
         run: |
           export SCCACHE_ERROR_LOG="$RUNNER_TEMP/sccache-android.log"
-          rm -f "$SCCCACHE_ERROR_LOG"
+          rm -f "$SCCACHE_ERROR_LOG"
           sccache --stop-server || true
           sccache --start-server
           sccache --show-stats || true
@@ -283,7 +283,7 @@ jobs:
           tar -xzf "$SHARED_PREP_ROOT/generated-mobile-sources.tgz" -C .
           mkdir -p .build-stamps
           touch .build-stamps/sync .build-stamps/bindings-kotlin
-          
+
       - name: Install cargo-ndk
         env:
           RUSTC_WRAPPER: sccache
@@ -319,16 +319,60 @@ jobs:
           LITTER_VERSION_CODE_OVERRIDE: ${{ env.LITTER_VERSION_CODE_OVERRIDE }}
         run: ./apps/android/scripts/bump-version.sh
 
-      - name: Build and publish Android release
+      - name: Build Rust Android release libs
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
+          CARGO_INCREMENTAL: "0"
+          CARGO_BUILD_JOBS: "1"
+          ANDROID_ABIS: arm64-v8a
+          ANDROID_RUST_PROFILE: mobile-release
+          RUSTC_WRAPPER: sccache
+        run: |
+          set -euo pipefail
+          export SCCACHE_ERROR_LOG="$RUNNER_TEMP/sccache-android.log"
+          trap 'status=$?; echo "==> sccache stats"; sccache --show-stats || true; if [ -f "$SCCACHE_ERROR_LOG" ]; then echo "==> sccache error log"; tail -200 "$SCCACHE_ERROR_LOG" || true; fi; exit $status' EXIT
+          sccache --zero-stats || true
+          make rust-android
+          echo "==> sccache stats after Android Rust build"
+          sccache --show-stats || true
+
+      - name: Build Android release APK
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
-          CARGO_BUILD_JOBS: "2"
-          GRADLE_MAX_WORKERS: "2"
-          ANDROID_ABIS: arm64-v8a
-          ANDROID_RUST_PROFILE: release
-          RUSTC_WRAPPER: sccache
+          GRADLE_MAX_WORKERS: "1"
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8
+          LITTER_UPLOAD_STORE_FILE: ${{ env.LITTER_UPLOAD_STORE_FILE }}
+          LITTER_UPLOAD_STORE_PASSWORD: ${{ secrets.LITTER_UPLOAD_STORE_PASSWORD }}
+          LITTER_UPLOAD_KEY_ALIAS: ${{ secrets.LITTER_UPLOAD_KEY_ALIAS }}
+          LITTER_UPLOAD_KEY_PASSWORD: ${{ secrets.LITTER_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          heartbeat() {
+            while sleep 60; do
+              echo "==> heartbeat $(date -u +%FT%TZ)"
+              free -h || true
+              df -h . || true
+            done
+          }
+          heartbeat &
+          HEARTBEAT_PID=$!
+          trap 'status=$?; kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true; wait "$HEARTBEAT_PID" 2>/dev/null || true; exit $status' EXIT
+          ./apps/android/gradlew -p apps/android --no-daemon --stacktrace "--max-workers=$GRADLE_MAX_WORKERS" \
+            :app:assembleRelease \
+            -PLITTER_UPLOAD_STORE_FILE="$LITTER_UPLOAD_STORE_FILE" \
+            -PLITTER_UPLOAD_STORE_PASSWORD="$LITTER_UPLOAD_STORE_PASSWORD" \
+            -PLITTER_UPLOAD_KEY_ALIAS="$LITTER_UPLOAD_KEY_ALIAS" \
+            -PLITTER_UPLOAD_KEY_PASSWORD="$LITTER_UPLOAD_KEY_PASSWORD"
+
+      - name: Publish Android bundle to Google Play
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
+          GRADLE_MAX_WORKERS: "1"
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8
           LITTER_VERSION_CODE_OVERRIDE: ${{ env.LITTER_VERSION_CODE_OVERRIDE }}
           LITTER_UPLOAD_STORE_FILE: ${{ env.LITTER_UPLOAD_STORE_FILE }}
           LITTER_UPLOAD_STORE_PASSWORD: ${{ secrets.LITTER_UPLOAD_STORE_PASSWORD }}
@@ -336,16 +380,20 @@ jobs:
           LITTER_UPLOAD_KEY_PASSWORD: ${{ secrets.LITTER_UPLOAD_KEY_PASSWORD }}
           LITTER_PLAY_SERVICE_ACCOUNT_JSON: ${{ env.LITTER_PLAY_SERVICE_ACCOUNT_JSON }}
           LITTER_PLAY_TRACK: internal
-          EXTRA_GRADLE_TASKS: ":app:assembleRelease"
         run: |
           set -euo pipefail
-          export SCCACHE_ERROR_LOG="$RUNNER_TEMP/sccache-android.log"
-          trap 'status=$?; echo "==> sccache stats"; sccache --show-stats || true; if [ -f "$SCCCACHE_ERROR_LOG" ]; then echo "==> sccache error log"; tail -200 "$SCCACHE_ERROR_LOG" || true; fi; exit $status' EXIT
-          sccache --zero-stats || true
-          make rust-android
+          heartbeat() {
+            while sleep 60; do
+              echo "==> heartbeat $(date -u +%FT%TZ)"
+              free -h || true
+              df -h . || true
+            done
+          }
+          heartbeat &
+          HEARTBEAT_PID=$!
+          trap 'status=$?; kill "$HEARTBEAT_PID" >/dev/null 2>&1 || true; wait "$HEARTBEAT_PID" 2>/dev/null || true; exit $status' EXIT
           ./apps/android/scripts/play-upload.sh
-          echo "==> sccache stats after Android publish"
-          scccache --show-stats || true
+          sccache --show-stats || true
 
       - name: Generate checksums
         run: |
@@ -361,7 +409,7 @@ jobs:
           name: android-play-release-${{ github.run_number }}
           if-no-files-found: error
           path: |
-            apps/android/app/build/outputs/apk/release/app-release.apk"
+            apps/android/app/build/outputs/apk/release/app-release.apk
             apps/android/app/build/outputs/apk/release/app-release.apk.sha256
             apps/android/app/build/outputs/bundle/release/app-release.aab
             apps/android/app/build/outputs/bundle/release/app-release.aab.sha256
@@ -426,14 +474,17 @@ jobs:
 
       - name: Prepare iOS release assets
         env:
-          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+          CARGO_BUILD_JOBS: "1"
+          IOS_RUST_PROFILE: mobile-release
           RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
           export SCCACHE_ERROR_LOG="$RUNNER_TEMP/sccache-ios.log"
           trap 'status=$?; echo "==> sccache stats"; sccache --show-stats || true; if [ -f "$SCCACHE_ERROR_LOG" ]; then echo "==> sccache error log"; tail -200 "$SCCACHE_ERROR_LOG" || true; fi; exit $status' EXIT
           sccache --zero-stats || true
-          make ios-release-prep
+          ./apps/ios/scripts/build-rust.sh --preserve-current --device-only --skip-bindings
+          make ios-frameworks xcgen
           echo "==> sccache stats after iOS release prep"
           sccache --show-stats || true
 

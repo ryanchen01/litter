@@ -32,6 +32,12 @@ SKIP_BINDINGS=0
 CARGO_FEATURES=""
 PROFILE="release"
 CARGO_PROFILE_FLAG="--release"
+IOS_RUST_PROFILE="${IOS_RUST_PROFILE:-release}"
+
+if [ "$IOS_RUST_PROFILE" != "release" ]; then
+  PROFILE="$IOS_RUST_PROFILE"
+  CARGO_PROFILE_FLAG="--profile $IOS_RUST_PROFILE"
+fi
 
 for arg in "$@"; do
   case "$arg" in

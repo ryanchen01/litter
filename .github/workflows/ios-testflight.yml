@@ -65,14 +65,17 @@ jobs:
 
       - name: Prepare iOS release assets
         env:
-          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+          CARGO_BUILD_JOBS: "1"
+          IOS_RUST_PROFILE: mobile-release
           RUSTC_WRAPPER: sccache
         run: |
           set -euo pipefail
           export SCCACHE_ERROR_LOG="$RUNNER_TEMP/sccache-ios.log"
           trap 'status=$?; echo "==> sccache stats"; sccache --show-stats || true; if [ -f "$SCCACHE_ERROR_LOG" ]; then echo "==> sccache error log"; tail -200 "$SCCACHE_ERROR_LOG" || true; fi; exit $status' EXIT
           sccache --zero-stats || true
-          make ios-release-prep
+          ./apps/ios/scripts/build-rust.sh --preserve-current --device-only
+          make ios-frameworks xcgen
           echo "==> sccache stats after iOS release prep"
           sccache --show-stats || true
 

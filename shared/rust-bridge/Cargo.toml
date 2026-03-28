@@ -45,6 +45,13 @@ tracing-subscriber = { version = "0.3", features = ["registry"] }
 strip = true
 lto = true
 
+[profile.mobile-release]
+inherits = "release"
+lto = false
+strip = true
+debug = 0
+codegen-units = 16
+
 [profile.android-dev]
 inherits = "release"
 lto = false

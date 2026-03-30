@@ -8,8 +8,12 @@ import kotlinx.coroutines.flow.update
 import uniffi.codex_mobile_client.AppThreadSnapshot
 import uniffi.codex_mobile_client.AppAskForApproval
 import uniffi.codex_mobile_client.AppReadOnlyAccess
+import uniffi.codex_mobile_client.AppDynamicToolSpec
 import uniffi.codex_mobile_client.AppSandboxMode
 import uniffi.codex_mobile_client.AppSandboxPolicy
+import uniffi.codex_mobile_client.generativeUiDynamicToolSpecs
+import com.litter.android.ui.ExperimentalFeatures
+import com.litter.android.ui.LitterFeature
 
 data class AppLaunchStateSnapshot(
     val currentCwd: String = "",
@@ -102,8 +106,11 @@ class AppLaunchState(context: Context) {
     fun turnSandboxPolicy(): AppSandboxPolicy? = sandboxModeValue()?.toTurnSandboxPolicy()
 
     fun threadStartRequest(cwd: String, modelOverride: String? = null) =
-        launchConfig(modelOverride).toAppStartThreadRequest(cwd.normalizedOrFallback("/"))
-            .also { updateCurrentCwd(it.cwd) }
+        launchConfig(modelOverride).toAppStartThreadRequest(
+            cwd = cwd.normalizedOrFallback("/"),
+            dynamicTools = if (ExperimentalFeatures.isEnabled(LitterFeature.GENERATIVE_UI))
+                generativeUiDynamicToolSpecs() else null,
+        ).also { updateCurrentCwd(it.cwd) }
 
     fun threadResumeRequest(
         threadId: String,

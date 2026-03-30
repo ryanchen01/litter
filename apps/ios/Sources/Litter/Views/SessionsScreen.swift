@@ -1095,7 +1095,11 @@ struct SessionsScreen: View {
         do {
             let startedKey = try await appModel.client.startThread(
                 serverId: serverId,
-                params: launchConfig().threadStartRequest(cwd: cwd)
+                params: launchConfig().threadStartRequest(
+                    cwd: cwd,
+                    dynamicTools: ExperimentalFeatures.shared.isEnabled(.generativeUI)
+                        ? generativeUiDynamicToolSpecs() : nil
+                )
             )
             RecentDirectoryStore.shared.record(path: cwd, for: serverId)
             appModel.store.setActiveThread(key: startedKey)

@@ -54,7 +54,6 @@ targets:
       - path: Sources/Litter/Resources/Fonts
       - path: Sources/Litter/Resources/Themes
       - path: Sources/Litter/Resources/TipJarProducts.storekit
-      - path: Sources/Litter/Resources/WidgetGuidelines
     dependencies:
       - sdk: CarPlay.framework
       - sdk: Security.framework

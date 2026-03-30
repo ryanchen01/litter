@@ -21,51 +21,46 @@ struct DynamicToolSpecParams: Encodable {
     }
 }
 
-// MARK: - Dynamic Tool Call Helpers
+// MARK: - JSON Schema Builder
 
-/// Parsed dynamic tool call from raw JSON server request params.
-struct ParsedDynamicToolCall {
-    let threadId: String
-    let turnId: String
-    let callId: String
-    let tool: String
-    let arguments: [String: Any]
+indirect enum JSONSchema: Encodable {
+    case object([String: JSONSchema], required: [String])
+    case array(items: JSONSchema)
+    case string(description: String? = nil)
+    case stringEnum(values: [String], description: String? = nil)
+    case number(description: String? = nil)
+    case boolean(description: String? = nil)
 
-    init?(from dict: [String: Any]) {
-        guard let threadId = dict["threadId"] as? String,
-              let turnId = dict["turnId"] as? String,
-              let callId = dict["callId"] as? String,
-              let tool = dict["tool"] as? String else {
-            return nil
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: SchemaKeys.self)
+        switch self {
+        case .object(let properties, let required):
+            try container.encode("object", forKey: .type)
+            try container.encode(properties, forKey: .properties)
+            if !required.isEmpty {
+                try container.encode(required, forKey: .required)
+            }
+        case .array(let items):
+            try container.encode("array", forKey: .type)
+            try container.encode(items, forKey: .items)
+        case .string(let description):
+            try container.encode("string", forKey: .type)
+            if let description { try container.encode(description, forKey: .description) }
+        case .stringEnum(let values, let description):
+            try container.encode("string", forKey: .type)
+            try container.encode(values, forKey: .enum_)
+            if let description { try container.encode(description, forKey: .description) }
+        case .number(let description):
+            try container.encode("number", forKey: .type)
+            if let description { try container.encode(description, forKey: .description) }
+        case .boolean(let description):
+            try container.encode("boolean", forKey: .type)
+            if let description { try container.encode(description, forKey: .description) }
         }
-        self.threadId = threadId
-        self.turnId = turnId
-        self.callId = callId
-        self.tool = tool
-        self.arguments = dict["arguments"] as? [String: Any] ?? [:]
-    }
-}
-
-/// Convenience builder for dynamic tool call responses sent back to the server.
-struct DynamicToolResult {
-    let contentItems: [[String: Any]]
-    let success: Bool
-
-    var asDictionary: [String: Any] {
-        ["contentItems": contentItems, "success": success]
     }
 
-    static func text(_ text: String) -> DynamicToolResult {
-        DynamicToolResult(
-            contentItems: [["type": "inputText", "text": text]],
-            success: true
-        )
-    }
-
-    static func error(_ message: String) -> DynamicToolResult {
-        DynamicToolResult(
-            contentItems: [["type": "inputText", "text": message]],
-            success: false
-        )
+    private enum SchemaKeys: String, CodingKey {
+        case type, properties, required, items, description
+        case enum_ = "enum"
     }
 }

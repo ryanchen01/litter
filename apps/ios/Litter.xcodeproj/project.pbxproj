@@ -20,7 +20,6 @@
 		0AC3B09D832DD47A0C781EE5 /* LitterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 359F3DCDC22C81682DAA7B0D /* LitterApp.swift */; };
 		0AE0806F82A8719DC9185E93 /* linear-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 1725F41F271A5EBF02FD4ECA /* linear-dark.json */; };
 		0B3D7FA5A29A90E2B439DDE7 /* github-dark-high-contrast.json in Resources */ = {isa = PBXBuildFile; fileRef = E1FAA725B26C5805C94EF40E /* github-dark-high-contrast.json */; };
-		0C650337DE414FC2772FCD57 /* core.md in Resources */ = {isa = PBXBuildFile; fileRef = 39FEE67AD5EE2E6940F2500D /* core.md */; };
 		0E130B9217359464AA4F5CBB /* SessionsDerivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC90A9241820BC40C754C2F9 /* SessionsDerivation.swift */; };
 		0F0C608E59628780225BF4EB /* MessageContentBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC0DA287A546D443E4A5655 /* MessageContentBridge.swift */; };
 		0FA2D55FE17D4AD9A910FB74 /* gruvbox-light-hard.json in Resources */ = {isa = PBXBuildFile; fileRef = 9AF7E00FF3D6A3D37B161855 /* gruvbox-light-hard.json */; };
@@ -57,7 +56,6 @@
 		2E4F6BA31997A35C1D8041AA /* lg2.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 728942810EA5AD9DBBD6CAF4 /* lg2.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		308721608A70A7E679A1737C /* ToolCallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB0858848FDF680B63C2432 /* ToolCallModels.swift */; };
 		31EB5932CBEDDB0E7FFB1158 /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1959956ABBEC98793B97B468 /* MessageBubbleView.swift */; };
-		356D4E4B81D4139E18C328D0 /* GenerativeUITools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78C802F9A5B896D6415A236B /* GenerativeUITools.swift */; };
 		380D1CCF1C5A57D37BBE374B /* files.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 19CB61EDE7B1FF0CF2EC81BB /* files.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		3867E91BD19F9448436E2B3E /* vitesse-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 43A18135FA93A4608A16C98F /* vitesse-dark.json */; };
 		38A86A578044482A98FA1081 /* ssh_cmd.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F3E5EA401672455EF2B1B5F1 /* ssh_cmd.xcframework */; };
@@ -94,17 +92,14 @@
 		5DCD93AFDFF3C4BF1388D5A9 /* VoiceSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE2C5F6A9589EF98EF22485 /* VoiceSessionModels.swift */; };
 		5DD814C6E3FA475AEC086F0D /* min-light.json in Resources */ = {isa = PBXBuildFile; fileRef = EC90366C4F2A6030ED27AE18 /* min-light.json */; };
 		5ED88E5A6CC21962CE4D70E6 /* VoiceSessionAudioCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C5CE45BB94C5FE9D2F8B57 /* VoiceSessionAudioCodec.swift */; };
-		5FC21B742C1E838A7BDACCDA /* WidgetGuidelines.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F62BD166C32FDA09B0BAC4 /* WidgetGuidelines.swift */; };
 		60FCC716C07EC118063B7E34 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE71A015A197F8B7F6AE82B8 /* Security.framework */; };
 		627A1B092D0230A7CA1B70DD /* SessionsTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9F1AA9A960B33D4BF4DEA49 /* SessionsTypes.swift */; };
 		62816361851EAD6AC2299E97 /* VideoWallpaperPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B361A4FDCFF12B0FE7E893EC /* VideoWallpaperPlayerView.swift */; };
 		63557B51D8BF09912B0FA35A /* rose-pine-x.json in Resources */ = {isa = PBXBuildFile; fileRef = 20B1DCDDBE304CA813E3FCD0 /* rose-pine-x.json */; };
 		6581AC9CBF009DB91CA3325C /* VoiceRuntimeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C2D998EDEC4E6034DC956F /* VoiceRuntimeController.swift */; };
 		66FE2D7231BFAD7FFF934886 /* shell.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 874C6CFBD438D4B4909DD1CF /* shell.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		67CDC840C2A64F510E588C1D /* ui_components.md in Resources */ = {isa = PBXBuildFile; fileRef = B19DF92111C95CD14FB7A0A2 /* ui_components.md */; };
 		68EDC8C615D0D6DDEB6665CC /* everforest-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 81C9F195FE7B59E6FF611CC4 /* everforest-dark.json */; };
 		69F93A646ED483E203C91800 /* notion-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 99BFC7A01A194E7508C5693C /* notion-light.json */; };
-		6AC6107CC04A2C18CBFC619E /* charts_chart_js.md in Resources */ = {isa = PBXBuildFile; fileRef = 8EAE71F8300362D819D91D16 /* charts_chart_js.md */; };
 		6B6DEAECC59EF7CB0B9500B9 /* brand_logo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 74E5DF89D0937E6C17F2BB94 /* brand_logo.svg */; };
 		6BF63183ECD96F34922779D9 /* everforest-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 88B886829FDF299DFFCC1A86 /* everforest-light.json */; };
 		6CCF5EA627DE6F2B495365EB /* AppServerHealth+UI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71FEC9FF70E821482C5960FD /* AppServerHealth+UI.swift */; };
@@ -125,7 +120,6 @@
 		7C5976CCE6B23D8E6A8FDB90 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA3937208B56CDD6E4E7406 /* NetworkMonitor.swift */; };
 		7DE5819DC695EDC07801E1F4 /* AppRpcParams.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1251509F0DDD4F5D494C9956 /* AppRpcParams.swift */; };
 		7E7B4AC85F18366192E98E8B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CFDCB6C4655E3D2D76B41B /* AppState.swift */; };
-		7F0FF3DCB1A0A3401DBA90C6 /* color_palette.md in Resources */ = {isa = PBXBuildFile; fileRef = F3089A3C0A4F5F8697D9BCF6 /* color_palette.md */; };
 		7F7580E318B61556359A4EC1 /* LitterUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D841AF0FFB0241834F88D0 /* LitterUITests.swift */; };
 		7F9E1F4E77278FA4C9D30B6A /* github-dark-dimmed.json in Resources */ = {isa = PBXBuildFile; fileRef = 69EC5386769902646C245936 /* github-dark-dimmed.json */; };
 		8162FA999156618F9B3D7ADF /* LiveActivityPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C822FD11C8902B0EDED54723 /* LiveActivityPreview.swift */; };
@@ -192,8 +186,6 @@
 		C866847E4BEBA8A05A0D1EB1 /* HomeDashboardSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FB206863136DF3B8FA50457 /* HomeDashboardSupport.swift */; };
 		CA5EB741004409272233EC14 /* dracula-soft.json in Resources */ = {isa = PBXBuildFile; fileRef = AF409B64E0082FC6B68379EA /* dracula-soft.json */; };
 		CA65DD4BFD664A3CCFFEBBAA /* codex-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 251EBDF798A64303E84D4139 /* codex-dark.json */; };
-		CAA3D0BD678E94B8579C05EA /* svg_setup.md in Resources */ = {isa = PBXBuildFile; fileRef = D4B3938E0E5F53DFF2F57D77 /* svg_setup.md */; };
-		CAB0DBF19F17A10C43E36009 /* art_and_illustration.md in Resources */ = {isa = PBXBuildFile; fileRef = E860F8954D2417BDC6047766 /* art_and_illustration.md */; };
 		CAD964BFE0DD71EC3210AF60 /* pierre-light.json in Resources */ = {isa = PBXBuildFile; fileRef = DAA99286AFF6A9ABC43C36D6 /* pierre-light.json */; };
 		CC1FE069BC90DDF2A8DFB783 /* SubagentCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8BA1DF8D1BBF028ACFBA7E0 /* SubagentCardView.swift */; };
 		CCEC8DC921FB6DB93D821519 /* VoiceTranscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57573910BEE96B3224934D2 /* VoiceTranscriptionManager.swift */; };
@@ -235,7 +227,6 @@
 		EBFE2F25D8DE79EEC06C7870 /* absolutely-dark.json in Resources */ = {isa = PBXBuildFile; fileRef = 779157C60F55F38A05F3CD1A /* absolutely-dark.json */; };
 		EC00B0B315DCFD1F2F1A03DE /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E108E5ACB93F4A71B484C125 /* AppModel.swift */; };
 		ECD39F196866971BFDF7E17D /* PerformanceHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE04FF38C9E336A47C7E161B /* PerformanceHelpersTests.swift */; };
-		ED2D3EEED95B99520754296C /* diagram_types.md in Resources */ = {isa = PBXBuildFile; fileRef = 9F7DE27E2CB2ACF5158BCF99 /* diagram_types.md */; };
 		EE7E51A2959425EDDC18DA39 /* IosSystemBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 384DA3FC92BDB0A50761B7FD /* IosSystemBridge.m */; };
 		EEEBA55C8002EECC829EB3E7 /* github-light.json in Resources */ = {isa = PBXBuildFile; fileRef = 760BBA087DD7F86B27829E23 /* github-light.json */; };
 		EF8743F1629EB0DCA20AE787 /* text.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CECEF29277C1DB1AD1EF304D /* text.xcframework */; };
@@ -369,7 +360,6 @@
 		359F3DCDC22C81682DAA7B0D /* LitterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LitterApp.swift; sourceTree = "<group>"; };
 		370F75B42793F9B35D8F4990 /* pierre-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "pierre-dark.json"; sourceTree = "<group>"; };
 		384DA3FC92BDB0A50761B7FD /* IosSystemBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = IosSystemBridge.m; sourceTree = "<group>"; };
-		39FEE67AD5EE2E6940F2500D /* core.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = core.md; sourceTree = "<group>"; };
 		3AF1303B192D17E47D3F9183 /* TipJarProducts.storekit */ = {isa = PBXFileReference; path = TipJarProducts.storekit; sourceTree = "<group>"; };
 		3BA392F9C2104B8B643C0F9E /* ToolCallCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallCardView.swift; sourceTree = "<group>"; };
 		3BD63CCD80D9E1F66879EF97 /* BerkeleyMono-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BerkeleyMono-Bold.otf"; sourceTree = "<group>"; };
@@ -443,7 +433,6 @@
 		77D950991BD0F0199209EB68 /* ExperimentalFeaturesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalFeaturesView.swift; sourceTree = "<group>"; };
 		77F28A803AA2BF325B0F88B9 /* ChatGPTOAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTOAuth.swift; sourceTree = "<group>"; };
 		78076308EEAAE64BC3BFDC1F /* AnimatedSplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedSplashView.swift; sourceTree = "<group>"; };
-		78C802F9A5B896D6415A236B /* GenerativeUITools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeUITools.swift; sourceTree = "<group>"; };
 		795964BC1D4B7081B774B65E /* one-light.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "one-light.json"; sourceTree = "<group>"; };
 		7D3ACFB8DE4FE6FD3D957F27 /* TurnLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnLiveActivityController.swift; sourceTree = "<group>"; };
 		7DD7A3A61A3B02E7E5BF0FBD /* LLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLog.swift; sourceTree = "<group>"; };
@@ -461,7 +450,6 @@
 		89172C83E4194291FF873A88 /* houston.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = houston.json; sourceTree = "<group>"; };
 		892D583790A9BD90CFD89701 /* LockScreenCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenCardView.swift; sourceTree = "<group>"; };
 		8BE99A02238FD8184F77DD49 /* WallpaperAdjustView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperAdjustView.swift; sourceTree = "<group>"; };
-		8EAE71F8300362D819D91D16 /* charts_chart_js.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = charts_chart_js.md; sourceTree = "<group>"; };
 		923C3634CB4FDDA1286DB63F /* LitterLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LitterLiveActivity.entitlements; sourceTree = "<group>"; };
 		92B7D5140C852FD035950C60 /* awk.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = awk.xcframework; path = Frameworks/ios_system/awk.xcframework; sourceTree = "<group>"; };
 		92C2D998EDEC4E6034DC956F /* VoiceRuntimeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRuntimeController.swift; sourceTree = "<group>"; };
@@ -478,7 +466,6 @@
 		9CD31922D3510DA506B0EC85 /* ThemeDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeDefinition.swift; sourceTree = "<group>"; };
 		9D216CEBFB1B4B71CFC2C0F8 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		9F39212507F7334160D127E8 /* CrossServerTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossServerTools.swift; sourceTree = "<group>"; };
-		9F7DE27E2CB2ACF5158BCF99 /* diagram_types.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = diagram_types.md; sourceTree = "<group>"; };
 		A062692D27F0F6966BBD1AE5 /* catppuccin-frappe.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "catppuccin-frappe.json"; sourceTree = "<group>"; };
 		A10240CEA11F064EBD138D97 /* vesper.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = vesper.json; sourceTree = "<group>"; };
 		A57573910BEE96B3224934D2 /* VoiceTranscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTranscriptionManager.swift; sourceTree = "<group>"; };
@@ -494,7 +481,6 @@
 		AF409B64E0082FC6B68379EA /* dracula-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "dracula-soft.json"; sourceTree = "<group>"; };
 		B0648D501D363553E86BAE63 /* BerkeleyMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BerkeleyMono-Regular.otf"; sourceTree = "<group>"; };
 		B0C1A0569B4424123A37B0DA /* ConversationPlanSemanticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationPlanSemanticsTests.swift; sourceTree = "<group>"; };
-		B19DF92111C95CD14FB7A0A2 /* ui_components.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ui_components.md; sourceTree = "<group>"; };
 		B361A4FDCFF12B0FE7E893EC /* VideoWallpaperPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoWallpaperPlayerView.swift; sourceTree = "<group>"; };
 		B5F860FAB94036E3AB6CEA11 /* ayu-dark.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "ayu-dark.json"; sourceTree = "<group>"; };
 		B776A14B7CB1BD40651E0EE1 /* material-theme-palenight.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "material-theme-palenight.json"; sourceTree = "<group>"; };
@@ -525,7 +511,6 @@
 		D0D72714D0B3E9209EF907B3 /* ConversationComposerContextBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationComposerContextBarView.swift; sourceTree = "<group>"; };
 		D1E96C6677B2AA22A101A29C /* ContextBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextBadgeView.swift; sourceTree = "<group>"; };
 		D2608C1F271D28BFEFBA5EFB /* kanagawa-lotus.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "kanagawa-lotus.json"; sourceTree = "<group>"; };
-		D4B3938E0E5F53DFF2F57D77 /* svg_setup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = svg_setup.md; sourceTree = "<group>"; };
 		D4BBEE5D22A050571A528EF0 /* catppuccin-mocha-Ry8aD-5u.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "catppuccin-mocha-Ry8aD-5u.json"; sourceTree = "<group>"; };
 		D887FC87082710CC7B75CC8A /* CodexTurnAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTurnAttributes.swift; sourceTree = "<group>"; };
 		D8AFE95BAB92C6CD6AAD8D69 /* HomeDashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDashboardModel.swift; sourceTree = "<group>"; };
@@ -540,10 +525,8 @@
 		E27C590AB2E27ACAAB6432EF /* ConversationWarmupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationWarmupView.swift; sourceTree = "<group>"; };
 		E2C54AE62D2865D1C7750F7A /* NetworkDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscovery.swift; sourceTree = "<group>"; };
 		E518CD2A67CEB8B41545D0D2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		E5F62BD166C32FDA09B0BAC4 /* WidgetGuidelines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetGuidelines.swift; sourceTree = "<group>"; };
 		E6E494F6BC6E1280CD7E4DD4 /* LitterUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LitterUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E744000053715A5866060B15 /* PreviewSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewSupport.swift; sourceTree = "<group>"; };
-		E860F8954D2417BDC6047766 /* art_and_illustration.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = art_and_illustration.md; sourceTree = "<group>"; };
 		E8733DBC110CC719F3AEAD45 /* gruvbox-dark-soft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "gruvbox-dark-soft.json"; sourceTree = "<group>"; };
 		E8ABCFE5B02E47BAA5599A8F /* rose-pine-moon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rose-pine-moon.json"; sourceTree = "<group>"; };
 		E91C5EBF4621C3644F62BED3 /* NetworkDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiscoveryTests.swift; sourceTree = "<group>"; };
@@ -553,7 +536,6 @@
 		EEDF2E1FEDF741D69062FDDD /* CodeBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeBlockView.swift; sourceTree = "<group>"; };
 		EF1C08AB8EA89D69A67AA7B2 /* WidgetWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetWebView.swift; sourceTree = "<group>"; };
 		F05E1F150502D4C5682EBBFD /* LitterPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LitterPalette.swift; sourceTree = "<group>"; };
-		F3089A3C0A4F5F8697D9BCF6 /* color_palette.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = color_palette.md; sourceTree = "<group>"; };
 		F3D4A4D1CF23CB67108386B5 /* libssh2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = libssh2.xcframework; path = Frameworks/ios_system/libssh2.xcframework; sourceTree = "<group>"; };
 		F3E5EA401672455EF2B1B5F1 /* ssh_cmd.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ssh_cmd.xcframework; path = Frameworks/ios_system/ssh_cmd.xcframework; sourceTree = "<group>"; };
 		F8A12810E0889BDD245C2379 /* VoiceCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallView.swift; sourceTree = "<group>"; };
@@ -658,20 +640,6 @@
 			path = Sources/Litter/Bridge;
 			sourceTree = "<group>";
 		};
-		5F90882DEAF98B2D9D9925FA /* WidgetGuidelines */ = {
-			isa = PBXGroup;
-			children = (
-				E860F8954D2417BDC6047766 /* art_and_illustration.md */,
-				8EAE71F8300362D819D91D16 /* charts_chart_js.md */,
-				F3089A3C0A4F5F8697D9BCF6 /* color_palette.md */,
-				39FEE67AD5EE2E6940F2500D /* core.md */,
-				9F7DE27E2CB2ACF5158BCF99 /* diagram_types.md */,
-				D4B3938E0E5F53DFF2F57D77 /* svg_setup.md */,
-				B19DF92111C95CD14FB7A0A2 /* ui_components.md */,
-			);
-			path = WidgetGuidelines;
-			sourceTree = "<group>";
-		};
 		8281D55E244D63BFA69DA67F /* CarPlay */ = {
 			isa = PBXGroup;
 			children = (
@@ -731,7 +699,6 @@
 				EB7A91131021ED64DF88AF8B /* Fonts */,
 				E2C5B24E4AF867AE552FE642 /* ios_system */,
 				DB02264740185FE99A0B2419 /* Themes */,
-				5F90882DEAF98B2D9D9925FA /* WidgetGuidelines */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -875,7 +842,6 @@
 				9F39212507F7334160D127E8 /* CrossServerTools.swift */,
 				7779BD02F3B304F9C3AD32A1 /* DiscoveredServer.swift */,
 				56597C90314B4DF5587C3949 /* ExperimentalFeatures.swift */,
-				78C802F9A5B896D6415A236B /* GenerativeUITools.swift */,
 				F05E1F150502D4C5682EBBFD /* LitterPalette.swift */,
 				7DD7A3A61A3B02E7E5BF0FBD /* LLog.swift */,
 				E2C54AE62D2865D1C7750F7A /* NetworkDiscovery.swift */,
@@ -899,7 +865,6 @@
 				6AE2C5F6A9589EF98EF22485 /* VoiceSessionModels.swift */,
 				A57573910BEE96B3224934D2 /* VoiceTranscriptionManager.swift */,
 				0CB4A268C8D43CA2144617DE /* WallpaperManager.swift */,
-				E5F62BD166C32FDA09B0BAC4 /* WidgetGuidelines.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1111,7 +1076,6 @@
 				998E606128A3770EE03927FB /* TipJarProducts.storekit in Resources */,
 				EBFE2F25D8DE79EEC06C7870 /* absolutely-dark.json in Resources */,
 				E8E9B961E3A52B3CB0169449 /* absolutely-light.json in Resources */,
-				CAB0DBF19F17A10C43E36009 /* art_and_illustration.md in Resources */,
 				4ACABB07003DBE73D7F4C3FC /* ayu-dark.json in Resources */,
 				2DBCCE766D2356AB34EA47CF /* brand_logo.png in Resources */,
 				6B6DEAECC59EF7CB0B9500B9 /* brand_logo.svg in Resources */,
@@ -1119,14 +1083,10 @@
 				CEA485200D8151C85EE9BC16 /* catppuccin-latte-Bd1wq-gC.json in Resources */,
 				71BDE48B071FBFA7B591DE4B /* catppuccin-macchiato.json in Resources */,
 				DE96D1BCB62F83DC4DAEB37C /* catppuccin-mocha-Ry8aD-5u.json in Resources */,
-				6AC6107CC04A2C18CBFC619E /* charts_chart_js.md in Resources */,
 				CA65DD4BFD664A3CCFFEBBAA /* codex-dark.json in Resources */,
 				B2AFC54D3C1CE47C58453313 /* codex-light.json in Resources */,
-				7F0FF3DCB1A0A3401DBA90C6 /* color_palette.md in Resources */,
 				536EF112EA2B3405B03B0BB6 /* commandDictionary.plist in Resources */,
-				0C650337DE414FC2772FCD57 /* core.md in Resources */,
 				3F40B95032B31B87D8DD870F /* dark-plus-B1yOZ-Hy.json in Resources */,
-				ED2D3EEED95B99520754296C /* diagram_types.md in Resources */,
 				CA5EB741004409272233EC14 /* dracula-soft.json in Resources */,
 				F6831A8E6FFFEFC130C8920D /* dracula.json in Resources */,
 				68EDC8C615D0D6DDEB6665CC /* everforest-dark.json in Resources */,
@@ -1183,11 +1143,9 @@
 				FA98FED0824E234BDFF458AC /* snazzy-light.json in Resources */,
 				8A04BCA096806B66BF373FF0 /* solarized-dark.json in Resources */,
 				F9CB7C7D1E911E4B1B7B06D9 /* solarized-light.json in Resources */,
-				CAA3D0BD678E94B8579C05EA /* svg_setup.md in Resources */,
 				9661EB7632A00EB0B261D7B9 /* temple-dark.json in Resources */,
 				8441369C5E7DF61BD94662F1 /* theme-manifest.json in Resources */,
 				ABA581671A2FB1B6756F6E6E /* tokyo-night.json in Resources */,
-				67CDC840C2A64F510E588C1D /* ui_components.md in Resources */,
 				001BDD45534A64FC3C162972 /* vesper.json in Resources */,
 				296F143C0AAB96F9FFBFC2FF /* vitesse-black.json in Resources */,
 				3867E91BD19F9448436E2B3E /* vitesse-dark.json in Resources */,
@@ -1295,7 +1253,6 @@
 				1C967C0A5AF4D5DEC4591326 /* ExperimentalFeatures.swift in Sources */,
 				9CF732EA96EBEF232E24F685 /* ExperimentalFeaturesView.swift in Sources */,
 				4CBDF32CF8B225BD0F4F272D /* Extensions.swift in Sources */,
-				356D4E4B81D4139E18C328D0 /* GenerativeUITools.swift in Sources */,
 				CD03B7391871A06D022D42BA /* HeaderView.swift in Sources */,
 				24972C06889B09BEC21162CB /* HomeDashboardModel.swift in Sources */,
 				C866847E4BEBA8A05A0D1EB1 /* HomeDashboardSupport.swift in Sources */,
@@ -1354,7 +1311,6 @@
 				D77023E14624950626E00AFE /* WallpaperAdjustView.swift in Sources */,
 				FCAE1D50167F5F4DB4287DEF /* WallpaperManager.swift in Sources */,
 				5D14555D5DD1647831E08F51 /* WallpaperSelectionView.swift in Sources */,
-				5FC21B742C1E838A7BDACCDA /* WidgetGuidelines.swift in Sources */,
 				18505C3526851FD8F141B78E /* WidgetWebView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

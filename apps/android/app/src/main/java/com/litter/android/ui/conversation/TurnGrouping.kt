@@ -236,7 +236,7 @@ fun CollapsedTurnCard(
             Text(
                 text = prompt,
                 color = LitterTheme.textPrimary,
-                fontSize = 13.sp,
+                fontSize = LitterTextStyle.footnote.scaled,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -247,7 +247,7 @@ fun CollapsedTurnCard(
             Text(
                 text = snippet,
                 color = LitterTheme.textSecondary,
-                fontSize = 12.sp,
+                fontSize = LitterTextStyle.caption.scaled,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 2.dp),
@@ -272,7 +272,7 @@ fun CollapsedTurnCard(
                 MetadataBadge(dur, LitterTheme.textMuted)
             }
             Spacer(Modifier.weight(1f))
-            Text("Tap to expand", color = LitterTheme.textMuted, fontSize = 10.sp)
+            Text("Tap to expand", color = LitterTheme.textMuted, fontSize = LitterTextStyle.caption2.scaled)
         }
     }
 }
@@ -282,7 +282,7 @@ private fun MetadataBadge(text: String, color: androidx.compose.ui.graphics.Colo
     Text(
         text = text,
         color = color,
-        fontSize = 10.sp,
+        fontSize = LitterTextStyle.caption2.scaled,
         fontWeight = FontWeight.Medium,
     )
 }

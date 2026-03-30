@@ -319,6 +319,7 @@ pub struct AppStartThreadRequest {
     pub sandbox: Option<AppSandboxMode>,
     pub developer_instructions: Option<String>,
     pub persist_extended_history: bool,
+    pub dynamic_tools: Option<Vec<AppDynamicToolSpec>>,
 }
 
 impl TryFrom<AppStartThreadRequest> for upstream::ThreadStartParams {
@@ -339,7 +340,28 @@ impl TryFrom<AppStartThreadRequest> for upstream::ThreadStartParams {
             developer_instructions: value.developer_instructions,
             personality: None,
             ephemeral: None,
-            dynamic_tools: None,
+            dynamic_tools: value
+                .dynamic_tools
+                .map(|tools| {
+                    tools
+                        .into_iter()
+                        .map(|spec| {
+                            let input_schema: serde_json::Value =
+                                serde_json::from_str(&spec.input_schema_json).map_err(|e| {
+                                    RpcClientError::Serialization(format!(
+                                        "parse dynamic tool input_schema_json: {e}"
+                                    ))
+                                })?;
+                            Ok(upstream::DynamicToolSpec {
+                                name: spec.name,
+                                description: spec.description,
+                                input_schema,
+                                defer_loading: spec.defer_loading,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, RpcClientError>>()
+                })
+                .transpose()?,
             mock_experimental_field: None,
             experimental_raw_events: false,
             persist_extended_history: value.persist_extended_history,

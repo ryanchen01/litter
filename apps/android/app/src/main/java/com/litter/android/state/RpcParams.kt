@@ -4,6 +4,7 @@ import uniffi.codex_mobile_client.AppAskForApproval
 import uniffi.codex_mobile_client.AppForkThreadFromMessageRequest
 import uniffi.codex_mobile_client.AppForkThreadRequest
 import uniffi.codex_mobile_client.AppResumeThreadRequest
+import uniffi.codex_mobile_client.AppDynamicToolSpec
 import uniffi.codex_mobile_client.AppStartThreadRequest
 import uniffi.codex_mobile_client.AppStartTurnRequest
 import uniffi.codex_mobile_client.ReasoningEffort
@@ -33,13 +34,17 @@ data class AppThreadLaunchConfig(
     val developerInstructions: String? = null,
     val persistHistory: Boolean = true,
 ) {
-    fun toAppStartThreadRequest(cwd: String): AppStartThreadRequest = AppStartThreadRequest(
+    fun toAppStartThreadRequest(
+        cwd: String,
+        dynamicTools: List<AppDynamicToolSpec>? = null,
+    ): AppStartThreadRequest = AppStartThreadRequest(
         model = model,
         cwd = cwd,
         approvalPolicy = approvalPolicy,
         sandbox = sandboxMode,
         developerInstructions = developerInstructions,
         persistExtendedHistory = persistHistory,
+        dynamicTools = dynamicTools,
     )
 
     fun toAppResumeThreadRequest(threadId: String, cwd: String? = null): AppResumeThreadRequest =

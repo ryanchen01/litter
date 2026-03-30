@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -442,7 +443,7 @@ private fun CommandExecutionRow(
                 Text(
                     text = formatDuration(ms),
                     color = statusTint(data.status),
-                    fontSize = 10.sp,
+                    fontSize = LitterTextStyle.caption2.scaled,
                 )
             }
         }
@@ -814,7 +815,7 @@ private fun DividerRow(
         Text(
             text = "  $label  ",
             color = LitterTheme.textMuted,
-            fontSize = 10.sp,
+            fontSize = LitterTextStyle.caption2.scaled,
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f),
@@ -974,7 +975,7 @@ private fun CodeBlockSegment(
             Text(
                 text = it.uppercase(),
                 color = LitterTheme.textSecondary,
-                fontSize = 10.sp,
+                fontSize = LitterTextStyle.caption2.scaled,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -1031,14 +1032,14 @@ private fun ToolCardShell(
                 Text(
                     text = formatDuration(ms),
                     color = statusTint(status),
-                    fontSize = 10.sp,
+                    fontSize = LitterTextStyle.caption2.scaled,
                 )
             }
             Spacer(Modifier.width(8.dp))
             Text(
                 text = if (expanded) "▲" else "▼",
                 color = accent,
-                fontSize = 10.sp,
+                fontSize = LitterTextStyle.caption2.scaled,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -1060,7 +1061,7 @@ private fun SectionLabel(text: String) {
     Text(
         text = text.uppercase(),
         color = LitterTheme.textSecondary,
-        fontSize = 10.sp,
+        fontSize = LitterTextStyle.caption2.scaled,
         fontWeight = FontWeight.Bold,
     )
 }
@@ -1130,13 +1131,13 @@ private fun KeyValueSection(
                     Text(
                         text = "$key:",
                         color = LitterTheme.textSecondary,
-                        fontSize = 10.sp,
+                        fontSize = LitterTextStyle.caption2.scaled,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = value,
                         color = LitterTheme.textSystem,
-                        fontSize = 10.sp,
+                        fontSize = LitterTextStyle.caption2.scaled,
                     )
                 }
             }
@@ -1297,7 +1298,7 @@ private fun SessionServerCard(
         Text(
             text = icon,
             color = LitterTheme.accent,
-            fontSize = 16.sp,
+            fontSize = LitterTextStyle.headline.scaled,
             fontWeight = FontWeight.Medium,
         )
         Column(modifier = Modifier.weight(1f)) {

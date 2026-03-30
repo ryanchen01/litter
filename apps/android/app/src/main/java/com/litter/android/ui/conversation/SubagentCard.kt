@@ -99,7 +99,7 @@ fun SubagentCard(
             Text(
                 text = agentCountLabel,
                 color = LitterTheme.textMuted,
-                fontSize = 10.sp,
+                fontSize = LitterTextStyle.caption2.scaled,
             )
             Spacer(Modifier.width(4.dp))
             Icon(
@@ -117,7 +117,7 @@ fun SubagentCard(
                 Text(
                     text = prompt,
                     color = LitterTheme.textMuted,
-                    fontSize = 10.sp,
+                    fontSize = LitterTextStyle.caption2.scaled,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp, start = 20.dp),
@@ -154,7 +154,7 @@ fun SubagentCard(
                             Text(
                                 text = statusText,
                                 color = statusColor,
-                                fontSize = 10.sp,
+                                fontSize = LitterTextStyle.caption2.scaled,
                             )
                         }
                     }

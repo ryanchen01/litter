@@ -82,8 +82,7 @@ DEV_CARGO_ENV := env -u CARGO_INCREMENTAL
 PATCH_FILES := \
 	$(PATCHES_DIR)/ios-exec-hook.patch \
 	$(PATCHES_DIR)/client-controlled-handoff.patch \
-	$(PATCHES_DIR)/mobile-code-mode-stub.patch \
-	$(PATCHES_DIR)/thread-serde-defaults.patch
+	$(PATCHES_DIR)/mobile-code-mode-stub.patch
 
 BOUNDARY_SOURCES := \
 	$(RUST_DIR)/codex-mobile-client/Cargo.toml \

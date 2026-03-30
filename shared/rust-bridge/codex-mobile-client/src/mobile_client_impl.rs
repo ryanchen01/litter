@@ -1721,6 +1721,10 @@ async fn execute_dynamic_tool_call(
     match params.tool.as_str() {
         "list_servers" => Ok(list_servers_tool_output(&targets)),
         "list_sessions" => list_sessions_tool_output(&targets, app_store, &params.arguments).await,
+        "visualize_read_me" => {
+            crate::widget_guidelines::handle_visualize_read_me(&params.arguments)
+        }
+        "show_widget" => crate::widget_guidelines::handle_show_widget(&params.arguments),
         tool => Err(format!("Unknown dynamic tool: {tool}")),
     }
 }

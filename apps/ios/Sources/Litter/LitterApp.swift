@@ -707,7 +707,11 @@ private struct HomeNavigationView: View {
         do {
             let key = try await appModel.client.startThread(
                 serverId: serverId,
-                params: launchConfig().threadStartRequest(cwd: cwd)
+                params: launchConfig().threadStartRequest(
+                    cwd: cwd,
+                    dynamicTools: ExperimentalFeatures.shared.isEnabled(.generativeUI)
+                        ? generativeUiDynamicToolSpecs() : nil
+                )
             )
             startedKey = key
             RecentDirectoryStore.shared.record(path: cwd, for: serverId)

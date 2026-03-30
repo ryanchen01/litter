@@ -7,14 +7,15 @@ struct AppThreadLaunchConfig: Equatable, Sendable {
     var developerInstructions: String?
     var persistExtendedHistory: Bool = true
 
-    func threadStartRequest(cwd: String) -> AppStartThreadRequest {
+    func threadStartRequest(cwd: String, dynamicTools: [AppDynamicToolSpec]? = nil) -> AppStartThreadRequest {
         AppStartThreadRequest(
             model: model,
             cwd: cwd,
             approvalPolicy: approvalPolicy,
             sandbox: sandbox,
             developerInstructions: developerInstructions,
-            persistExtendedHistory: persistExtendedHistory
+            persistExtendedHistory: persistExtendedHistory,
+            dynamicTools: dynamicTools
         )
     }
 

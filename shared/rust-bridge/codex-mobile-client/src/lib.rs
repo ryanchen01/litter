@@ -20,6 +20,7 @@ pub mod ssh;
 pub mod store;
 pub mod transport;
 pub mod types;
+pub mod widget_guidelines;
 mod mobile_client_impl;
 
 pub use mobile_client_impl::*;

@@ -389,6 +389,7 @@ private fun ReasoningRow(
         text = reasoningText,
         color = LitterTheme.textSecondary,
         fontSize = LitterTextStyle.footnote.scaled,
+        fontFamily = LitterTheme.monoFont,
         fontStyle = FontStyle.Italic,
         modifier = Modifier
             .fillMaxWidth()
@@ -907,15 +908,16 @@ private fun MarkdownText(
     AndroidView(
         factory = { ctx ->
             TextView(ctx).apply {
-                setTextColor(LitterTheme.textBody.hashCode())
+                setTextColor(LitterTheme.textBody.toArgb())
                 textSize = LitterTextStyle.body * textScale
                 movementMethod = LinkMovementMethod.getInstance()
-                setLinkTextColor(LitterTheme.accent.hashCode())
+                setLinkTextColor(LitterTheme.accent.toArgb())
             }
         },
         update = { tv ->
+            tv.setTextColor(LitterTheme.textBody.toArgb())
+            tv.textSize = LitterTextStyle.body * textScale
             markwon.setMarkdown(tv, text)
-            tv.setTextColor(android.graphics.Color.parseColor("#E0E0E0"))
         },
         modifier = modifier.fillMaxWidth(),
     )

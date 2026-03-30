@@ -710,6 +710,7 @@ private struct HomeNavigationView: View {
                 params: launchConfig().threadStartRequest(cwd: cwd)
             )
             startedKey = key
+            RecentDirectoryStore.shared.record(path: cwd, for: serverId)
             appModel.store.setActiveThread(key: startedKey)
             await appModel.refreshSnapshot()
         } catch {

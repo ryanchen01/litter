@@ -580,6 +580,22 @@ class VoiceRuntimeController {
                 startAudioCapture(appModel, threadKey)
             }
 
+            is AppStoreUpdateRecord.FullResync -> {
+                // After a lagged resync we may have missed RealtimeStarted.
+                // Refresh the Kotlin snapshot from Rust, then check if voice is live.
+                val session = _activeSession.value ?: return
+                appModel.refreshSnapshot()
+                val voiceSession = appModel.snapshot.value?.voiceSession
+                android.util.Log.i("VoiceRuntime", "FullResync: activeThread=${voiceSession?.activeThread} isCapturing=$isCapturing")
+                if (session.threadKey == voiceSession?.activeThread &&
+                    !isCapturing &&
+                    !isStopRequested(session.threadKey)
+                ) {
+                    android.util.Log.i("VoiceRuntime", "FullResync: voice session already active, starting audio capture")
+                    startAudioCapture(appModel, session.threadKey)
+                }
+            }
+
             is AppStoreUpdateRecord.VoiceSessionChanged -> {
                 val session = _activeSession.value ?: return
                 val voiceSession = appModel.snapshot.value?.voiceSession

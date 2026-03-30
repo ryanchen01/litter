@@ -59,9 +59,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.litter.android.state.isConnected
 import com.litter.android.ui.LocalAppModel
 import com.litter.android.ui.LitterTheme
+import com.litter.android.ui.RecentDirectoryEntry
+import com.litter.android.ui.RecentDirectoryStore
 import com.litter.android.ui.home.HomeDashboardSupport
 import kotlinx.coroutines.launch
 import uniffi.codex_mobile_client.AppArchiveThreadRequest
@@ -80,6 +83,7 @@ fun SessionsScreen(
     onInfo: (() -> Unit)? = null,
 ) {
     val appModel = LocalAppModel.current
+    val context = LocalContext.current
     val snapshot by appModel.snapshot.collectAsState()
     val scope = rememberCoroutineScope()
     val connectedServerIds = remember(snapshot) {
@@ -203,6 +207,28 @@ fun SessionsScreen(
             return@LaunchedEffect
         }
         loadSessions(force = hasLoadedInitialSessions)
+
+        // Seed recent directories from loaded sessions.
+        val snap = appModel.snapshot.value
+        if (snap != null) {
+            val recentStore = RecentDirectoryStore(context)
+            for (server in snap.servers) {
+                val entries = snap.sessionSummaries
+                    .filter { it.key.serverId == server.serverId && it.cwd.isNotBlank() }
+                    .map { summary ->
+                        RecentDirectoryEntry(
+                            serverId = server.serverId,
+                            path = summary.cwd,
+                            lastUsedAtEpochMillis = (summary.updatedAt ?: 0L) * 1000L,
+                            useCount = 0,
+                        )
+                    }
+                if (entries.isNotEmpty()) {
+                    recentStore.mergeSessionDirectories(server.serverId, entries)
+                }
+            }
+        }
+
         scheduleActiveSessionScrollIfNeeded()
     }
 
@@ -630,6 +656,9 @@ private fun SessionNodeRow(
                     showArchiveDialog = false
                     scope.launch {
                         try {
+                            if (appModel.snapshot.value?.activeThread == summary.key) {
+                                appModel.store.setActiveThread(null)
+                            }
                             appModel.client.archiveThread(
                                 summary.key.serverId,
                                 AppArchiveThreadRequest(threadId = summary.key.threadId),

@@ -1025,6 +1025,27 @@ struct SessionsScreen: View {
             )
         }
         await appModel.refreshSnapshot()
+
+        // Seed recent directories from loaded sessions.
+        if let snapshot = appModel.snapshot {
+            for server in snapshot.servers {
+                let entries = snapshot.sessionSummaries
+                    .filter { $0.key.serverId == server.serverId && !$0.cwd.isEmpty }
+                    .map { summary in
+                        let date = summary.updatedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) } ?? Date.distantPast
+                        return RecentDirectoryEntry(
+                            serverId: server.serverId,
+                            path: summary.cwd,
+                            lastUsedAt: date,
+                            useCount: 0
+                        )
+                    }
+                if !entries.isEmpty {
+                    RecentDirectoryStore.shared.mergeSessionDirectories(entries, for: server.serverId)
+                }
+            }
+        }
+
         hasLoadedInitialSessions = true
         isLoading = false
     }
@@ -1045,6 +1066,9 @@ struct SessionsScreen: View {
                     cwdOverride: thread.cwd
                 )
             )
+            if !thread.cwd.isEmpty {
+                RecentDirectoryStore.shared.record(path: thread.cwd, for: thread.key.serverId)
+            }
             appModel.store.setActiveThread(key: nextKey)
             await appModel.refreshSnapshot()
             openedKey = nextKey
@@ -1073,6 +1097,7 @@ struct SessionsScreen: View {
                 serverId: serverId,
                 params: launchConfig().threadStartRequest(cwd: cwd)
             )
+            RecentDirectoryStore.shared.record(path: cwd, for: serverId)
             appModel.store.setActiveThread(key: startedKey)
             await appModel.refreshSnapshot()
             guard let resolvedKey = await appModel.ensureThreadLoaded(key: startedKey)

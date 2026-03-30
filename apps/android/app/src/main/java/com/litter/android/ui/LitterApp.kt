@@ -59,9 +59,11 @@ fun LitterApp(appModel: AppModel) {
         ExperimentalFeatures.initialize(context)
     }
 
+    // Read currentStep so Compose tracks it as a dependency and recomposes on change.
+    val textScale = ConversationTextSize.fromStep(TextSizePrefs.currentStep).scale
     CompositionLocalProvider(
         LocalAppModel provides appModel,
-        LocalTextScale provides TextSizePrefs.currentScale,
+        LocalTextScale provides textScale,
     ) {
         val snapshot by appModel.snapshot.collectAsState()
         val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -108,6 +110,7 @@ fun LitterApp(appModel: AppModel) {
                 serverId,
                 appModel.launchState.threadStartRequest(cwd),
             )
+            RecentDirectoryStore(context).record(serverId, cwd)
             appModel.store.setActiveThread(startedKey)
             appModel.refreshSnapshot()
             val resolvedKey = appModel.ensureThreadLoaded(startedKey)

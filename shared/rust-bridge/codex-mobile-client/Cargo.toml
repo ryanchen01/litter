@@ -48,6 +48,7 @@ rpc-trace = []
 uniffi = { version = "0.31.0", features = ["build"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+codex-apply-patch = { workspace = true }
 codex-ios-audio = { path = "../codex-ios-audio" }
 
 [target.'cfg(target_os = "android")'.dependencies]

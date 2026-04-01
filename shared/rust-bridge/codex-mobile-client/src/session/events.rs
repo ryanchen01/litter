@@ -621,7 +621,10 @@ impl EventProcessor {
             key,
             approval: PendingApprovalWithSeed {
                 approval,
-                seed: PendingApprovalSeed { raw_params },
+                seed: PendingApprovalSeed {
+                    request_id: request_id.clone(),
+                    raw_params,
+                },
             },
         });
     }

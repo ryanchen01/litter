@@ -553,4 +553,3 @@ mod tests {
         assert_eq!(current_agent_directory_version(&snapshot), expected);
     }
 }
-

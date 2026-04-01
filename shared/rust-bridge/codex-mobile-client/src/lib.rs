@@ -5,6 +5,8 @@
 
 #[cfg(target_os = "ios")]
 mod aec;
+#[cfg(target_os = "ios")]
+mod ios_exec;
 
 pub mod conversation;
 pub mod conversation_uniffi;

@@ -710,13 +710,13 @@ impl MobileClient {
             server_id: server_id.to_string(),
             thread_id: params.thread_id.clone(),
         };
-        let queued_preview = self
-            .snapshot_thread(&thread_key)
-            .ok()
-            .filter(|thread| {
-                thread.active_turn_id.is_some() || thread.info.status == ThreadSummaryStatus::Active
-            })
-            .and_then(|_| queued_follow_up_preview_from_inputs(&params.input));
+        let thread_snapshot = self.snapshot_thread(&thread_key).ok();
+        let has_active_session = thread_snapshot.as_ref().is_some_and(|thread| {
+            thread.active_turn_id.is_some() || thread.info.status == ThreadSummaryStatus::Active
+        });
+        let queued_preview = has_active_session
+            .then(|| queued_follow_up_preview_from_inputs(&params.input))
+            .flatten();
         if let Some(preview) = queued_preview.clone() {
             self.app_store
                 .enqueue_thread_follow_up_preview(&thread_key, preview);
@@ -927,11 +927,10 @@ impl MobileClient {
             return Ok(());
         }
         let response_json = approval_response_json(&approval, approval_seed.as_ref(), decision)?;
+        let response_request_id =
+            server_request_id_json(approval_request_id(&approval, approval_seed.as_ref()));
         session
-            .respond(
-                serde_json::Value::String(approval.id.clone()),
-                response_json,
-            )
+            .respond(response_request_id, response_json)
             .await?;
         debug!(
             "MobileClient: approval response sent for server={} request_id={}",
@@ -2391,6 +2390,7 @@ fn pending_approval_from_ipc_projection(
     server_id: &str,
     approval: ProjectedApprovalRequest,
 ) -> PendingApprovalWithSeed {
+    let request_id = approval.id.clone();
     let public_approval = PendingApproval {
         id: approval.id,
         server_id: server_id.to_string(),
@@ -2411,6 +2411,7 @@ fn pending_approval_from_ipc_projection(
     PendingApprovalWithSeed {
         approval: public_approval,
         seed: PendingApprovalSeed {
+            request_id: upstream::RequestId::String(request_id),
             raw_params: approval.raw_params,
         },
     }
@@ -2469,6 +2470,7 @@ fn sync_ipc_thread_requests(
             seed: app_store
                 .pending_approval_seed(&approval.server_id, &approval.id)
                 .unwrap_or(PendingApprovalSeed {
+                    request_id: fallback_server_request_id(&approval.id),
                     raw_params: seed_ipc_approval_request_params(&approval)
                         .unwrap_or(serde_json::Value::Null),
                 }),
@@ -3228,6 +3230,7 @@ fn try_apply_incremental_ipc_patch_burst(
             seed: app_store
                 .pending_approval_seed(&approval.server_id, &approval.id)
                 .unwrap_or(PendingApprovalSeed {
+                    request_id: fallback_server_request_id(&approval.id),
                     raw_params: seed_ipc_approval_request_params(&approval)
                         .unwrap_or(serde_json::Value::Null),
                 }),
@@ -3685,6 +3688,27 @@ fn approval_response_json(
     .map_err(|e| RpcError::Deserialization(format!("serialize approval response: {e}")))
 }
 
+fn approval_request_id(
+    approval: &PendingApproval,
+    seed: Option<&PendingApprovalSeed>,
+) -> upstream::RequestId {
+    seed.map(|seed| seed.request_id.clone())
+        .unwrap_or_else(|| fallback_server_request_id(&approval.id))
+}
+
+fn fallback_server_request_id(id: &str) -> upstream::RequestId {
+    id.parse::<i64>()
+        .map(upstream::RequestId::Integer)
+        .unwrap_or_else(|_| upstream::RequestId::String(id.to_string()))
+}
+
+fn server_request_id_json(id: upstream::RequestId) -> serde_json::Value {
+    match id {
+        upstream::RequestId::Integer(value) => serde_json::Value::Number(value.into()),
+        upstream::RequestId::String(value) => serde_json::Value::String(value),
+    }
+}
+
 #[cfg(test)]
 mod mobile_client_tests {
     use super::*;
@@ -3878,6 +3902,54 @@ mod mobile_client_tests {
     fn remote_oauth_callback_port_reads_localhost_redirect() {
         let auth_url = "https://auth.openai.com/oauth/authorize?response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=abc";
         assert_eq!(remote_oauth_callback_port(auth_url).unwrap(), 1455);
+    }
+
+    #[test]
+    fn approval_request_id_prefers_seed_type_for_local_responses() {
+        let approval = PendingApproval {
+            id: "42".to_string(),
+            server_id: "srv".to_string(),
+            kind: crate::types::ApprovalKind::Permissions,
+            thread_id: Some("thread-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            item_id: Some("item-1".to_string()),
+            command: None,
+            path: None,
+            grant_root: None,
+            cwd: None,
+            reason: None,
+        };
+        let seed = PendingApprovalSeed {
+            request_id: upstream::RequestId::Integer(42),
+            raw_params: json!({}),
+        };
+
+        assert_eq!(
+            server_request_id_json(approval_request_id(&approval, Some(&seed))),
+            json!(42)
+        );
+    }
+
+    #[test]
+    fn approval_request_id_falls_back_to_string_for_non_numeric_ids() {
+        let approval = PendingApproval {
+            id: "req-42".to_string(),
+            server_id: "srv".to_string(),
+            kind: crate::types::ApprovalKind::Permissions,
+            thread_id: Some("thread-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            item_id: Some("item-1".to_string()),
+            command: None,
+            path: None,
+            grant_root: None,
+            cwd: None,
+            reason: None,
+        };
+
+        assert_eq!(
+            server_request_id_json(approval_request_id(&approval, None)),
+            json!("req-42")
+        );
     }
 
     #[test]

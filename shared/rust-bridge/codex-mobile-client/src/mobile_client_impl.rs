@@ -35,7 +35,7 @@ use codex_ipc::{
     ClientStatus, CommandExecutionApprovalDecision, ConversationStreamApplyError,
     FileChangeApprovalDecision, ImmerOp, ImmerPatch, ImmerPathSegment, IpcClient, IpcClientConfig,
     IpcError, ProjectedApprovalKind, ProjectedApprovalRequest, ProjectedUserInputRequest,
-    ReconnectPolicy, ReconnectingIpcClient, StreamChange,
+    ReconnectPolicy, ReconnectingIpcClient, RequestError, StreamChange,
     ThreadFollowerCommandApprovalDecisionParams, ThreadFollowerFileApprovalDecisionParams,
     ThreadFollowerSetCollaborationModeParams, ThreadFollowerStartTurnParams,
     ThreadFollowerSubmitUserInputParams, ThreadStreamStateChangedParams, TypedBroadcast,
@@ -67,7 +67,12 @@ const USER_INPUT_OTHER_OPTION_LABEL: &str = "None of the above";
 const USER_INPUT_RECONCILE_DELAYS_MS: [u64; 3] = [150, 800, 2500];
 
 fn ipc_command_error_clears_server_ipc_state(error: &IpcError) -> bool {
-    matches!(error, IpcError::Transport(_) | IpcError::NotConnected)
+    matches!(
+        error,
+        IpcError::Transport(_)
+            | IpcError::NotConnected
+            | IpcError::Request(RequestError::NoClientFound | RequestError::ClientDisconnected)
+    )
 }
 
 fn ipc_command_error_context(error: &IpcError) -> &'static str {
@@ -1082,7 +1087,7 @@ impl MobileClient {
                     queued
                 })
                 .collect::<Vec<_>>();
-            ipc_client
+            match ipc_client
                 .set_queued_follow_ups_state(
                     codex_ipc::ThreadFollowerSetQueuedFollowUpsStateParams {
                         conversation_id: key.thread_id.clone(),
@@ -1090,15 +1095,29 @@ impl MobileClient {
                     },
                 )
                 .await
-                .map_err(|error| {
+            {
+                Ok(_) => {
+                    self.app_store.set_thread_follow_up_drafts(key, next_drafts);
+                    return Ok(());
+                }
+                Err(error) => {
+                    warn!(
+                        "MobileClient: IPC steer queued follow-up failed for {} thread {}: {} ({})",
+                        key.server_id,
+                        key.thread_id,
+                        error,
+                        ipc_command_error_context(&error)
+                    );
                     if ipc_command_error_clears_server_ipc_state(&error) {
                         self.app_store
                             .update_server_ipc_state(&key.server_id, false);
+                    } else {
+                        return Err(RpcError::Deserialization(format!(
+                            "IPC steer queued follow-up: {error}"
+                        )));
                     }
-                    RpcError::Deserialization(format!("IPC steer queued follow-up: {error}"))
-                })?;
-            self.app_store.set_thread_follow_up_drafts(key, next_drafts);
-            return Ok(());
+                }
+            }
         }
 
         let active_turn_id = thread.active_turn_id.ok_or_else(|| {
@@ -1137,7 +1156,7 @@ impl MobileClient {
             .collect::<Vec<_>>();
 
         if let Some(ipc_client) = session.ipc_client() {
-            ipc_client
+            match ipc_client
                 .set_queued_follow_ups_state(
                     codex_ipc::ThreadFollowerSetQueuedFollowUpsStateParams {
                         conversation_id: key.thread_id.clone(),
@@ -1145,13 +1164,26 @@ impl MobileClient {
                     },
                 )
                 .await
-                .map_err(|error| {
+            {
+                Ok(_) => {}
+                Err(error) => {
+                    warn!(
+                        "MobileClient: IPC delete queued follow-up failed for {} thread {}: {} ({})",
+                        key.server_id,
+                        key.thread_id,
+                        error,
+                        ipc_command_error_context(&error)
+                    );
                     if ipc_command_error_clears_server_ipc_state(&error) {
                         self.app_store
                             .update_server_ipc_state(&key.server_id, false);
+                    } else {
+                        return Err(RpcError::Deserialization(format!(
+                            "IPC delete queued follow-up: {error}"
+                        )));
                     }
-                    RpcError::Deserialization(format!("IPC delete queued follow-up: {error}"))
-                })?;
+                }
+            }
         }
 
         self.app_store.set_thread_follow_up_drafts(key, next_drafts);
@@ -6272,5 +6304,17 @@ mod mobile_client_tests {
 
         assert_eq!(preview.kind, AppQueuedFollowUpKind::PendingSteer);
         assert_eq!(preview.text, "Please try the same search again.");
+    }
+
+    #[test]
+    fn ipc_no_client_found_clears_server_ipc_state() {
+        let error = IpcError::Request(RequestError::NoClientFound);
+        assert!(ipc_command_error_clears_server_ipc_state(&error));
+    }
+
+    #[test]
+    fn ipc_client_disconnected_clears_server_ipc_state() {
+        let error = IpcError::Request(RequestError::ClientDisconnected);
+        assert!(ipc_command_error_clears_server_ipc_state(&error));
     }
 }

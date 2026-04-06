@@ -77,6 +77,8 @@ if [[ -z "$VERSION_ID" ]]; then
     exit 1
 fi
 
+mkdir -p "$FASTLANE_METADATA_DIR/screenshots"
+
 echo "==> Importing repo-managed App Store metadata"
 asc migrate import \
     --app "$APP_STORE_APP_ID" \

@@ -6,6 +6,7 @@ actor PushProxyClient {
     struct RegisterBody: Encodable {
         let platform: String
         let pushToken: String
+        let apnsEnvironment: String
         let intervalSeconds: Int
         let ttlSeconds: Int
     }
@@ -20,7 +21,12 @@ actor PushProxyClient {
             "push proxy register request",
             fields: ["intervalSeconds": interval, "ttlSeconds": ttl]
         )
-        let body = RegisterBody(platform: "ios", pushToken: pushToken, intervalSeconds: interval, ttlSeconds: ttl)
+        #if DEBUG
+        let apnsEnv = "sandbox"
+        #else
+        let apnsEnv = "production"
+        #endif
+        let body = RegisterBody(platform: "ios", pushToken: pushToken, apnsEnvironment: apnsEnv, intervalSeconds: interval, ttlSeconds: ttl)
         let data = try await post(path: "/register", body: body)
         return try JSONDecoder().decode(RegisterResponse.self, from: data).id
     }

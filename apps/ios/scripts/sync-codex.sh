@@ -10,6 +10,7 @@ PATCH_FILES=(
     "$REPO_DIR/patches/codex/client-controlled-handoff.patch"
     "$REPO_DIR/patches/codex/mobile-code-mode-stub.patch"
     "$REPO_DIR/patches/codex/thread-read-permissions.patch"
+    "$REPO_DIR/patches/codex/mobile-shell-snapshot-timeout.patch"
 )
 
 patch_already_upstreamed() {

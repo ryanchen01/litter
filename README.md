@@ -19,10 +19,10 @@
 ## Screenshots (iOS)
 
 <p align="center">
-  <img src="apps/ios/fastlane/screenshots/01-hero-iphone-1320x2868.png" alt="Home" width="200" />
-  <img src="apps/ios/fastlane/screenshots/02-remote-iphone-1320x2868.png" alt="Remote servers" width="200" />
-  <img src="apps/ios/fastlane/screenshots/07-generative-ui-iphone-1320x2868.png" alt="Generative UI" width="200" />
-  <img src="apps/ios/fastlane/screenshots/05-realtime-voice-iphone-1320x2868.png" alt="Realtime voice" width="200" />
+  <img src="docs/screenshots/01-hero-iphone-1320x2868.png" alt="Home" width="200" />
+  <img src="docs/screenshots/02-remote-iphone-1320x2868.png" alt="Remote servers" width="200" />
+  <img src="docs/screenshots/07-generative-ui-iphone-1320x2868.png" alt="Generative UI" width="200" />
+  <img src="docs/screenshots/05-realtime-voice-iphone-1320x2868.png" alt="Realtime voice" width="200" />
 </p>
 
 ## Quick Start

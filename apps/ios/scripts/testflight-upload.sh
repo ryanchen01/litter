@@ -350,7 +350,7 @@ if [[ -n "$build_id" && -n "$WHAT_TO_TEST" ]]; then
 
     if [[ -n "$notes_id" ]]; then
         asc builds test-notes update \
-            --note-id "$notes_id" \
+            --localization-id "$notes_id" \
             --whats-new "$WHAT_TO_TEST" \
             --output json >/dev/null
     else

@@ -332,8 +332,8 @@ if [[ -n "$build_id" && "$AUTO_ASSIGN_ENCRYPTION_DECLARATION" == "1" ]]; then
         if [[ -n "$declaration_id" ]]; then
             echo "==> Assigning build $build_id to encryption declaration $declaration_id"
             asc encryption declarations assign-builds \
-                --declaration-id "$declaration_id" \
-                --build-id "$build_id" \
+                --id "$declaration_id" \
+                --build "$build_id" \
                 --output json >/dev/null || true
         fi
     fi
@@ -365,14 +365,14 @@ if [[ "$ASSIGN_BETA_GROUP" == "1" && -n "$build_id" ]]; then
         [[ -n "$group_name" ]] || continue
 
         beta_group_id="$(
-            asc testflight beta-groups list --app "$APP_STORE_APP_ID" --output json |
+            asc testflight groups list --app "$APP_STORE_APP_ID" --output json |
                 jq -r --arg name "$group_name" '.data[] | select(.attributes.name == $name) | .id' |
                 head -n 1
         )"
 
         if [[ -z "$beta_group_id" ]]; then
             create_cmd=(
-                asc testflight beta-groups create
+                asc testflight groups create
                 --app "$APP_STORE_APP_ID"
                 --name "$group_name"
                 --output json
@@ -421,7 +421,7 @@ fi
 
 if [[ -n "$build_id" ]]; then
     echo "==> Validating TestFlight readiness"
-    asc validate testflight --app "$APP_STORE_APP_ID" --build-id "$build_id" --strict --output json >/dev/null
+    asc validate testflight --app "$APP_STORE_APP_ID" --build "$build_id" --strict --output json >/dev/null
 fi
 
 if [[ "$PROJECT_VERSION_BUMP_REQUIRED" == "1" ]]; then

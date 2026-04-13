@@ -321,7 +321,7 @@ fi
 
 if [[ -n "$build_id" && "$AUTO_ASSIGN_ENCRYPTION_DECLARATION" == "1" ]]; then
     internal_state="$(
-        asc builds build-beta-detail get --build "$build_id" --output json |
+        asc builds build-beta-detail view --build-id "$build_id" --output json |
             jq -r '.data.attributes.internalBuildState // empty'
     )"
     if [[ "$internal_state" == "MISSING_EXPORT_COMPLIANCE" ]]; then

@@ -552,7 +552,7 @@ struct MessageBubbleView: View {
             let parsed = systemParseResultForRendering
             switch parsed {
             case .recognized(let model):
-                ToolCallCardView(model: model)
+                ToolCallCardView(model: model, serverId: serverId)
             case .unrecognized:
                 genericSystemBubble
             }

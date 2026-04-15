@@ -45,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +57,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -72,6 +74,7 @@ import com.litter.android.ui.LitterTextStyle
 import com.litter.android.ui.LitterTheme
 import com.litter.android.ui.LocalTextScale
 import com.litter.android.ui.scaled
+import com.litter.android.state.AppModel
 import io.noties.markwon.Markwon
 import io.noties.markwon.syntax.SyntaxHighlightPlugin
 import io.noties.prism4j.Prism4j
@@ -83,7 +86,9 @@ import uniffi.codex_mobile_client.HydratedConversationItem
 import uniffi.codex_mobile_client.HydratedConversationItemContent
 import uniffi.codex_mobile_client.HydratedPlanStepStatus
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Renders a single [HydratedConversationItem] by matching on its content type.
@@ -175,6 +180,11 @@ fun ConversationTimelineItem(
             data = content.v1,
         )
 
+        is HydratedConversationItemContent.ImageView -> ImageViewRow(
+            data = content.v1,
+            serverId = serverId,
+        )
+
         is HydratedConversationItemContent.Widget -> WidgetRow(
             data = content.v1,
         )
@@ -208,6 +218,7 @@ private fun HydratedConversationItemContent.shouldAutoFollowRenderedContent(): B
         is HydratedConversationItemContent.DynamicToolCall,
         is HydratedConversationItemContent.MultiAgentAction,
         is HydratedConversationItemContent.WebSearch,
+        is HydratedConversationItemContent.ImageView,
         is HydratedConversationItemContent.Widget -> true
         else -> false
     }
@@ -666,6 +677,9 @@ private fun FileChangeRow(
     val summary = remember(data.changes) {
         buildFileChangeSummary(data)
     }
+    val diffChanges = remember(data.changes) {
+        data.changes.filter { it.diff.isNotBlank() }
+    }
 
     ToolCardShell(
         summary = summary.plainText,
@@ -673,13 +687,14 @@ private fun FileChangeRow(
         accent = LitterTheme.toolCallFileChange,
         status = data.status,
     ) {
-        if (data.changes.isNotEmpty()) {
+        if (diffChanges.isEmpty() && data.changes.isNotEmpty()) {
             ListSection("Files", data.changes.map { workspaceTitle(it.path) })
         }
-        data.changes.forEach { change ->
-            if (change.diff.isNotBlank()) {
-                DiffSection(label = workspaceTitle(change.path), content = change.diff)
-            }
+        diffChanges.forEach { change ->
+            DiffSection(
+                label = if (diffChanges.size > 1) workspaceTitle(change.path) else "",
+                content = change.diff,
+            )
         }
     }
 }
@@ -888,6 +903,109 @@ private fun WebSearchRow(
             InlineTextSection("Query", data.query)
         }
         data.actionJson?.takeIf { it.isNotBlank() }?.let { CodeSection("Action", it) }
+    }
+}
+
+@Composable
+private fun ImageViewRow(
+    data: uniffi.codex_mobile_client.HydratedImageViewData,
+    serverId: String,
+) {
+    ToolCardShell(
+        summary = workspaceTitle(data.path),
+        accent = LitterTheme.warning,
+        status = AppOperationStatus.COMPLETED,
+        defaultExpanded = true,
+    ) {
+        ImageResultSection(path = data.path, serverId = serverId)
+        KeyValueSection("Metadata", listOf("Path" to data.path))
+    }
+}
+
+private sealed interface ToolImageLoadState {
+    data object Loading : ToolImageLoadState
+    data class Loaded(val bitmap: android.graphics.Bitmap) : ToolImageLoadState
+    data class Failed(val message: String) : ToolImageLoadState
+}
+
+@Composable
+private fun ImageResultSection(
+    path: String,
+    serverId: String,
+) {
+    val appModel = LocalAppModel.current
+    val loadState by produceState<ToolImageLoadState>(
+        initialValue = ToolImageLoadState.Loading,
+        path,
+        serverId,
+    ) {
+        value = ToolImageLoadState.Loading
+        value = loadToolImage(appModel, path, serverId)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionLabel("Image")
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(LitterTheme.codeBackground, RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (val state = loadState) {
+                ToolImageLoadState.Loading -> {
+                    CircularProgressIndicator(
+                        color = LitterTheme.accent,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.padding(vertical = 24.dp),
+                    )
+                }
+
+                is ToolImageLoadState.Loaded -> {
+                    Image(
+                        bitmap = state.bitmap.asImageBitmap(),
+                        contentDescription = workspaceTitle(path),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                    )
+                }
+
+                is ToolImageLoadState.Failed -> {
+                    Text(
+                        text = state.message,
+                        color = LitterTheme.danger,
+                        fontSize = LitterTextStyle.caption.scaled,
+                        modifier = Modifier.padding(vertical = 20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private suspend fun loadToolImage(
+    appModel: AppModel,
+    path: String,
+    serverId: String,
+): ToolImageLoadState {
+    return try {
+        val resolved = withContext(Dispatchers.IO) {
+            appModel.client.resolveImageView(serverId, path)
+        }
+        val bitmap = BitmapFactory.decodeByteArray(resolved.bytes, 0, resolved.bytes.size)
+        if (bitmap != null) {
+            ToolImageLoadState.Loaded(bitmap)
+        } else {
+            ToolImageLoadState.Failed("Could not decode the image.")
+        }
+    } catch (error: Exception) {
+        val message = error.message?.trim().orEmpty()
+        ToolImageLoadState.Failed(
+            if (message.isNotEmpty()) message else "Image unavailable",
+        )
     }
 }
 
@@ -1484,7 +1602,9 @@ private fun DiffSection(
     content: String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SectionLabel(label)
+        if (label.isNotEmpty()) {
+            SectionLabel(label)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             content.lines().forEach { line ->
                 Text(

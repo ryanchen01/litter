@@ -419,6 +419,8 @@ private struct ConversationTimelineItemRow: View, Equatable {
                 )
             case .webSearch(let data):
                 toolCallRow(makeWebSearchModel(data))
+            case .imageView(let data):
+                toolCallRow(makeImageViewModel(data))
             case .widget(let data):
                 WidgetContainerView(
                     widget: data.widgetState,
@@ -460,6 +462,7 @@ private struct ConversationTimelineItemRow: View, Equatable {
     private func toolCallRow(_ model: ToolCallCardModel) -> some View {
         ToolCallCardView(
             model: model,
+            serverId: serverId,
             externalExpanded: !isLiveTurn && shouldPreserveRichDetail
         )
     }
@@ -519,13 +522,15 @@ private struct ConversationTimelineItemRow: View, Equatable {
         let changedPaths = data.changes.map(\.path)
         let summary = fileChangeSummary(for: data)
 
-        var sections: [ToolCallSection] = []
-        if !changedPaths.isEmpty {
-            sections.append(.list(label: "Files", items: changedPaths.map(workspaceTitle(for:))))
-        }
         let diffSections = data.changes.compactMap { change -> ToolCallSection? in
             guard !change.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return .diff(label: workspaceTitle(for: change.path), content: change.diff)
+            let label = data.changes.count > 1 ? workspaceTitle(for: change.path) : ""
+            return .diff(label: label, content: change.diff)
+        }
+
+        var sections: [ToolCallSection] = []
+        if diffSections.isEmpty, !changedPaths.isEmpty {
+            sections.append(.list(label: "Files", items: changedPaths.map(workspaceTitle(for:))))
         }
         sections.append(contentsOf: diffSections)
         if let outputDelta = data.outputDelta?.trimmingCharacters(in: .whitespacesAndNewlines), !outputDelta.isEmpty {
@@ -689,6 +694,25 @@ private struct ConversationTimelineItemRow: View, Equatable {
             status: data.isInProgress ? .inProgress : .completed,
             duration: nil,
             sections: sections
+        )
+    }
+
+    private func makeImageViewModel(_ data: ConversationImageViewData) -> ToolCallCardModel {
+        let trimmedPath = data.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = workspaceTitle(for: trimmedPath)
+        return ToolCallCardModel(
+            kind: .imageView,
+            title: "Image View",
+            summary: displayName.isEmpty ? "Image" : displayName,
+            status: .completed,
+            duration: nil,
+            sections: [
+                .kv(
+                    label: "Metadata",
+                    entries: [ToolCallKeyValue(key: "Path", value: trimmedPath)]
+                )
+            ],
+            initiallyExpanded: true
         )
     }
 }
@@ -1949,7 +1973,7 @@ private struct ConversationDiffDetailSheet: View {
                 .padding(.bottom, 8)
 
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 1) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(lines) { line in
                             Text(verbatim: line.text.isEmpty ? " " : line.text)
                                 .litterMonoFont(size: 12)
@@ -1965,6 +1989,10 @@ private struct ConversationDiffDetailSheet: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
+                .background(LitterTheme.codeBackground.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
             .background(LitterTheme.backgroundGradient.ignoresSafeArea())
             .navigationTitle(title)
@@ -2018,6 +2046,8 @@ private extension ConversationItem {
             return data.status.toolCallStatus
         case .webSearch(let data):
             return data.isInProgress ? .inProgress : .completed
+        case .imageView:
+            return .completed
         default:
             return nil
         }

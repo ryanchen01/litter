@@ -188,6 +188,10 @@ private struct InlineHandoffEntry: Identifiable {
             self.id = item.id
             self.text = data.query.isEmpty ? "Searching web" : "Searching: \(data.query)"
             self.style = .status
+        case .imageView(let data):
+            self.id = item.id
+            self.text = "Viewed image: \(workspaceTitle(for: data.path))"
+            self.style = .status
         case .widget:
             return nil
         case .userInputResponse:

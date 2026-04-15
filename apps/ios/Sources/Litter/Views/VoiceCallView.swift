@@ -557,6 +557,14 @@ private struct VoiceTranscriptEntry: Identifiable, Equatable {
                 body: [data.query, data.actionJSON].compactMap { $0 }.joined(separator: "\n\n")
             )
 
+        case .imageView(let data):
+            self = VoiceTranscriptEntry(
+                id: item.id,
+                kind: .tool,
+                title: "IMAGE VIEW",
+                body: data.path
+            )
+
         case .widget(let data):
             self = VoiceTranscriptEntry(
                 id: item.id,

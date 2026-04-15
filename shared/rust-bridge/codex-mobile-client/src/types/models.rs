@@ -346,6 +346,14 @@ impl From<upstream::CommandExecResponse> for CommandExecResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[derive(uniffi::Record)]
+pub struct ResolvedImageViewResult {
+    pub path: String,
+    pub bytes: Vec<u8>,
+}
+
 /// A segment of a directory path for breadcrumb display.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct DirectoryPathSegment {

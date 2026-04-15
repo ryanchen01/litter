@@ -388,9 +388,8 @@ fn convert_thread_item(
             )
         }
         ThreadItem::ImageView { path, .. } => (
-            HydratedConversationItemContent::Note(HydratedNoteData {
-                title: "Image View".to_string(),
-                body: format!("Path: {path}"),
+            HydratedConversationItemContent::ImageView(HydratedImageViewData {
+                path: path.clone(),
             }),
             false,
         ),
@@ -1158,11 +1157,15 @@ diff --git a/parser.rs b/parser.rs\n\
                     query: "swiftui subagent cards".into(),
                     action: None,
                 },
+                ThreadItem::ImageView {
+                    id: "img-1".into(),
+                    path: "/tmp/screenshot.png".into(),
+                },
             ],
         )];
 
         let items = hydrate_turns(&turns, &HydrationOptions::default());
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 5);
 
         assert!(matches!(
             items[0].content,
@@ -1179,6 +1182,10 @@ diff --git a/parser.rs b/parser.rs\n\
         assert!(matches!(
             items[3].content,
             HydratedConversationItemContent::WebSearch(_)
+        ));
+        assert!(matches!(
+            items[4].content,
+            HydratedConversationItemContent::ImageView(_)
         ));
     }
 }

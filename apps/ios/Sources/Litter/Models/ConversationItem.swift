@@ -177,6 +177,10 @@ struct ConversationWebSearchData: Equatable {
     var isInProgress: Bool
 }
 
+struct ConversationImageViewData: Equatable {
+    var path: String
+}
+
 struct ConversationWidgetData: Equatable {
     var widgetState: WidgetState
     var status: String
@@ -233,6 +237,7 @@ enum ConversationItemContent: Equatable {
     case dynamicToolCall(ConversationDynamicToolCallData)
     case multiAgentAction(ConversationMultiAgentActionData)
     case webSearch(ConversationWebSearchData)
+    case imageView(ConversationImageViewData)
     case widget(ConversationWidgetData)
     case userInputResponse(ConversationUserInputResponseData)
     case divider(ConversationDividerKind)
@@ -495,6 +500,9 @@ struct ConversationItem: Identifiable, Equatable {
             hasher.combine(data.query)
             hasher.combine(data.actionJSON)
             hasher.combine(data.isInProgress)
+        case .imageView(let data):
+            hasher.combine("imageView")
+            hasher.combine(data.path)
         case .widget(let data):
             hasher.combine("widget")
             hasher.combine(data.status)
@@ -716,6 +724,12 @@ private extension HydratedConversationItemContent {
                     query: data.query,
                     actionJSON: data.actionJson,
                     isInProgress: data.isInProgress
+                )
+            )
+        case .imageView(let data):
+            return .imageView(
+                ConversationImageViewData(
+                    path: data.path
                 )
             )
         case .widget(let data):

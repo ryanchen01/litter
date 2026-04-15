@@ -31,6 +31,7 @@ pub enum HydratedConversationItemContent {
     DynamicToolCall(HydratedDynamicToolCallData),
     MultiAgentAction(HydratedMultiAgentActionData),
     WebSearch(HydratedWebSearchData),
+    ImageView(HydratedImageViewData),
     Widget(HydratedWidgetData),
     UserInputResponse(HydratedUserInputResponseData),
     Divider(HydratedDividerData),
@@ -205,6 +206,11 @@ pub struct HydratedWebSearchData {
     pub query: String,
     pub action_json: Option<String>,
     pub is_in_progress: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]
+pub struct HydratedImageViewData {
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, uniffi::Record)]

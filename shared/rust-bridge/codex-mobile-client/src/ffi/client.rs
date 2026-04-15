@@ -535,10 +535,7 @@ impl AppClient {
     ///
     /// Tries POSIX `$HOME` first, falls back to Windows `%USERPROFILE%`.
     /// Returns `"/"` if both fail.
-    pub async fn resolve_remote_home(
-        &self,
-        server_id: String,
-    ) -> Result<String, ClientError> {
+    pub async fn resolve_remote_home(&self, server_id: String) -> Result<String, ClientError> {
         blocking_async!(self.rt, self.inner, |c| {
             // Try POSIX
             if let Ok(resp) = exec_command_simple(
@@ -588,7 +585,11 @@ impl AppClient {
         blocking_async!(self.rt, self.inner, |c| {
             let normalized = {
                 let p = path.trim();
-                if p.is_empty() { "/".to_string() } else { p.to_string() }
+                if p.is_empty() {
+                    "/".to_string()
+                } else {
+                    p.to_string()
+                }
             };
             let rp = crate::remote_path::RemotePath::parse(&normalized);
             let is_windows = rp.is_windows();
@@ -611,8 +612,7 @@ impl AppClient {
                 }));
             }
 
-            let directories =
-                crate::remote_path::parse_directory_listing(&resp.stdout, is_windows);
+            let directories = crate::remote_path::parse_directory_listing(&resp.stdout, is_windows);
             Ok(types::DirectoryListResult {
                 directories,
                 path: normalized,
@@ -675,13 +675,9 @@ async fn resolve_image_view_bytes(
                 ));
             }
 
-            let response = exec_command_simple_owned(
-                client,
-                server_id,
-                image_read_command(&path),
-                None,
-            )
-            .await?;
+            let response =
+                exec_command_simple_owned(client, server_id, image_read_command(&path), None)
+                    .await?;
 
             if response.exit_code != 0 {
                 let stderr = response.stderr.trim();
@@ -699,7 +695,9 @@ async fn resolve_image_view_bytes(
                 .collect();
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(payload)
-                .map_err(|error| ClientError::Serialization(format!("invalid image base64: {error}")))?;
+                .map_err(|error| {
+                    ClientError::Serialization(format!("invalid image base64: {error}"))
+                })?;
 
             Ok(types::ResolvedImageViewResult { path, bytes })
         }

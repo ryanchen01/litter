@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use crate::conversation_uniffi::*;
 use crate::parser::{
-    parse_code_review_message, CodeReviewCodeLocation, CodeReviewFinding, CodeReviewLineRange,
-    CodeReviewPayload,
+    CodeReviewCodeLocation, CodeReviewFinding, CodeReviewLineRange, CodeReviewPayload,
+    parse_code_review_message,
 };
 use crate::types::{AppMessagePhase, AppOperationStatus, AppSubagentStatus};
 use codex_app_server_protocol::{

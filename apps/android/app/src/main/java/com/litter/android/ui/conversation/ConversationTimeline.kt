@@ -35,9 +35,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -346,6 +349,7 @@ private fun AssistantMessageRow(
         if (!isStreamingMessage) {
             renderedText = data.text
             pendingText = null
+            StreamingTextCoordinator.evict(itemId)
             return@LaunchedEffect
         }
         if (data.text == renderedText) return@LaunchedEffect
@@ -389,18 +393,18 @@ private fun AssistantMessageRow(
             Spacer(Modifier.height(2.dp))
         }
 
-        val streamingBlocks = remember(renderedText, itemId, serverId, agentDirectoryVersion, isStreamingMessage) {
-            if (!isStreamingMessage) {
-                emptyList()
-            } else {
-                appModel.parser.extractRenderBlocksTyped(renderedText)
-            }
+        if (isStreamingMessage) {
+            StreamingMarkdownView(
+                text = renderedText,
+                itemId = itemId,
+                onRendered = onStreamingSnapshotRendered,
+            )
+        } else {
+            AssistantRenderBlocks(
+                blocks = renderBlocks,
+                fallbackText = renderedText,
+            )
         }
-
-        AssistantRenderBlocks(
-            blocks = if (isStreamingMessage) streamingBlocks else renderBlocks,
-            fallbackText = renderedText,
-        )
     }
 }
 
@@ -1269,6 +1273,17 @@ private fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    if (com.litter.android.state.DebugSettings.enabled && com.litter.android.state.DebugSettings.disableMarkdown) {
+        Text(
+            text = text,
+            color = LitterTheme.textBody,
+            fontFamily = FontFamily.Monospace,
+            fontSize = LitterTextStyle.body.scaled,
+            modifier = modifier.fillMaxWidth(),
+        )
+        return
+    }
+
     val context = LocalContext.current
     val textScale = LocalTextScale.current
     val markwon = remember(context) {
@@ -1605,33 +1620,15 @@ private fun DiffSection(
         if (label.isNotEmpty()) {
             SectionLabel(label)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            content.lines().forEach { line ->
-                Text(
-                    text = if (line.isEmpty()) " " else line,
-                    color = when {
-                        line.startsWith("+") && !line.startsWith("+++") -> LitterTheme.success
-                        line.startsWith("-") && !line.startsWith("---") -> LitterTheme.danger
-                        line.startsWith("@@") -> LitterTheme.accentStrong
-                        else -> LitterTheme.textBody
-                    },
-                    fontFamily = LitterTheme.monoFont,
-                    fontSize = LitterTextStyle.body.scaled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            when {
-                                line.startsWith("+") && !line.startsWith("+++") -> LitterTheme.success.copy(alpha = 0.12f)
-                                line.startsWith("-") && !line.startsWith("---") -> LitterTheme.danger.copy(alpha = 0.12f)
-                                line.startsWith("@@") -> LitterTheme.accentStrong.copy(alpha = 0.12f)
-                                else -> LitterTheme.codeBackground.copy(alpha = 0.72f)
-                            },
-                            RoundedCornerShape(8.dp),
-                        )
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                )
-            }
-        }
+        SyntaxHighlightedDiffBlock(
+            diff = content,
+            titleHint = label.ifEmpty { null },
+            fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(LitterTheme.codeBackground, RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
     }
 }
 
@@ -1644,10 +1641,18 @@ private fun RichDynamicToolResult(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 payload.items.forEach { item ->
                     SessionServerCard(
-                        icon = if (item.isLocal) "⌁" else "◫",
+                        icon = {
+                            Icon(
+                                if (item.isLocal) Icons.Default.PhoneAndroid else Icons.Default.Dns,
+                                contentDescription = null,
+                                tint = LitterTheme.accent,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
                         title = item.name,
                         subtitle = item.hostname,
                         trailing = if (item.isConnected) "Connected" else "Offline",
+                        statusDotColor = if (item.isConnected) LitterTheme.success else LitterTheme.textMuted,
                     )
                 }
             }
@@ -1658,12 +1663,20 @@ private fun RichDynamicToolResult(
                     val subtitle = listOfNotNull(
                         item.serverName?.takeIf { it.isNotBlank() },
                         item.model?.takeIf { it.isNotBlank() },
-                    ).joinToString(" · ")
+                    ).joinToString(" \u00b7 ")
                     SessionServerCard(
-                        icon = "◌",
+                        icon = {
+                            Icon(
+                                Icons.Default.Chat,
+                                contentDescription = null,
+                                tint = LitterTheme.accent,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
                         title = item.title.ifBlank { "Untitled session" },
                         subtitle = subtitle,
                         trailing = null,
+                        statusDotColor = null,
                     )
                 }
             }
@@ -1673,10 +1686,11 @@ private fun RichDynamicToolResult(
 
 @Composable
 private fun SessionServerCard(
-    icon: String,
+    icon: @Composable () -> Unit,
     title: String,
     subtitle: String,
     trailing: String?,
+    statusDotColor: Color?,
 ) {
     Row(
         modifier = Modifier
@@ -1686,12 +1700,14 @@ private fun SessionServerCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = icon,
-            color = LitterTheme.accent,
-            fontSize = LitterTextStyle.headline.scaled,
-            fontWeight = FontWeight.Medium,
-        )
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(LitterTheme.accent.copy(alpha = 0.12f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            icon()
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -1710,12 +1726,27 @@ private fun SessionServerCard(
                 )
             }
         }
-        trailing?.let {
-            Text(
-                text = it,
-                color = LitterTheme.textMuted,
-                fontSize = LitterTextStyle.caption.scaled,
-            )
+        if (statusDotColor != null || trailing != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                statusDotColor?.let { dotColor ->
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(dotColor),
+                    )
+                }
+                trailing?.let {
+                    Text(
+                        text = it,
+                        color = LitterTheme.textMuted,
+                        fontSize = LitterTextStyle.caption.scaled,
+                    )
+                }
+            }
         }
     }
 }

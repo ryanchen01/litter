@@ -635,22 +635,53 @@ fun ComposerBar(
                     }
 
                     else -> {
-                        Spacer(Modifier.width(8.dp))
-                        IconButton(
-                            onClick = {
-                                if (transcriptionManager.hasMicPermission(context)) {
-                                    transcriptionManager.startRecording(context)
-                                } else {
-                                    micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Mic,
-                                contentDescription = "Voice",
-                                tint = LitterTheme.textSecondary,
+                        val realtimeAvailable = remember {
+                            com.litter.android.ui.ExperimentalFeatures.isEnabled(
+                                com.litter.android.ui.LitterFeature.REALTIME_VOICE,
                             )
+                        }
+                        val voiceController = remember { com.litter.android.state.VoiceRuntimeController.shared }
+                        val voiceSession by voiceController.activeVoiceSession.collectAsState()
+                        val voiceSnapshot by appModel.snapshot.collectAsState()
+                        val voicePhase = voiceSnapshot?.voiceSession?.phase
+                        val voiceInputLevel = voiceSession?.inputLevel ?: 0f
+
+                        if (realtimeAvailable && text.isEmpty()) {
+                            Spacer(Modifier.width(8.dp))
+                            com.litter.android.ui.voice.InlineVoiceButton(
+                                phase = voicePhase,
+                                inputLevel = voiceInputLevel,
+                                isAvailable = true,
+                                onStart = {
+                                    scope.launch {
+                                        voiceController.startVoiceOnThread(appModel, threadKey)
+                                    }
+                                },
+                                onStop = {
+                                    scope.launch {
+                                        voiceController.stopActiveVoiceSession(appModel)
+                                    }
+                                },
+                                modifier = Modifier.size(32.dp),
+                            )
+                        } else {
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    if (transcriptionManager.hasMicPermission(context)) {
+                                        transcriptionManager.startRecording(context)
+                                    } else {
+                                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
+                                },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Mic,
+                                    contentDescription = "Voice",
+                                    tint = LitterTheme.textSecondary,
+                                )
+                            }
                         }
                     }
                 }
@@ -706,6 +737,19 @@ fun ComposerBar(
     }
 
     if (showAttachMenu) {
+        val clipboardManager = remember { context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager }
+        val clipboardHasImage = remember(showAttachMenu) {
+            val clip = clipboardManager.primaryClip ?: return@remember false
+            if (clip.itemCount == 0) return@remember false
+            val desc = clip.description
+            for (i in 0 until desc.mimeTypeCount) {
+                if (desc.getMimeType(i).startsWith("image/")) return@remember true
+            }
+            clip.getItemAt(0)?.uri?.let { uri ->
+                context.contentResolver.getType(uri)?.startsWith("image/") == true
+            } ?: false
+        }
+
         ModalBottomSheet(
             onDismissRequest = { showAttachMenu = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -723,6 +767,20 @@ fun ComposerBar(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
+
+                if (clipboardHasImage) {
+                    AttachmentActionRow(
+                        title = "Paste Image",
+                        onClick = {
+                            showAttachMenu = false
+                            val clip = clipboardManager.primaryClip
+                            val uri = clip?.getItemAt(0)?.uri
+                            if (uri != null) {
+                                attachedImage = readAttachmentFromUri(context, uri)
+                            }
+                        },
+                    )
+                }
 
                 AttachmentActionRow(
                     title = "Photo Library",

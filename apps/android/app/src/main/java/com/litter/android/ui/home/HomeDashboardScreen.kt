@@ -4,6 +4,7 @@ import com.sigkitten.litter.android.BuildConfig
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.litter.android.state.AppThreadLaunchConfig
 import com.litter.android.state.AppLifecycleController
+import com.litter.android.state.DebugSettings
 import com.litter.android.state.SavedServerStore
 import com.litter.android.state.connectionModeLabel
 import com.litter.android.state.displayTitle
@@ -81,7 +83,7 @@ import uniffi.codex_mobile_client.AppServerSnapshot
 import uniffi.codex_mobile_client.AppSessionSummary
 import uniffi.codex_mobile_client.ThreadKey
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeDashboardScreen(
     onOpenConversation: (ThreadKey) -> Unit,
@@ -274,52 +276,84 @@ fun HomeDashboardScreen(
         val isActive = voiceSession != null
         val voicePhase = snapshot?.voiceSession?.phase
 
-        FloatingActionButton(
-            onClick = onStartVoice,
+        val orbColor = when (voicePhase) {
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.CONNECTING,
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.LISTENING,
+            -> LitterTheme.accentStrong
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.SPEAKING,
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.THINKING,
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.HANDOFF,
+            -> LitterTheme.warning
+            uniffi.codex_mobile_client.AppVoiceSessionPhase.ERROR -> LitterTheme.danger
+            else -> LitterTheme.accentStrong
+        }
+
+        val inputLevel = voiceSession?.inputLevel ?: 0f
+        val pulseScale by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isActive) 1f + inputLevel * 0.12f else 1f,
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = 150),
+            label = "orbPulse",
+        )
+
+        val buttonDiameter = if (isActive) 68.dp else 60.dp
+
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 24.dp)
-                .size(if (isActive) 68.dp else 60.dp),
-            shape = CircleShape,
-            containerColor = if (isActive) LitterTheme.warning else LitterTheme.accent,
-            contentColor = Color.White,
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp),
-        ) {
-            if (isActive) {
-                // Show phase-aware icon
-                when (voicePhase) {
-                    uniffi.codex_mobile_client.AppVoiceSessionPhase.CONNECTING -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp,
-                            color = Color.White,
-                        )
-                    }
-                    else -> {
-                        Icon(
-                            Icons.Default.Mic,
-                            contentDescription = "Voice active",
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                }
-            } else {
-                Icon(
-                    Icons.Default.Mic,
-                    contentDescription = "Start voice",
-                    modifier = Modifier.size(22.dp),
+                .size(buttonDiameter * pulseScale)
+                .clip(CircleShape)
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            orbColor.copy(alpha = 0.96f),
+                            orbColor.copy(alpha = 0.58f),
+                            LitterTheme.surface.copy(alpha = 0.92f),
+                        ),
+                    ),
+                    shape = CircleShape,
                 )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (isActive) 0.24f else 0.14f),
+                    shape = CircleShape,
+                )
+                .clickable(onClick = onStartVoice),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (voicePhase) {
+                uniffi.codex_mobile_client.AppVoiceSessionPhase.CONNECTING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White,
+                    )
+                }
+                else -> {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = if (isActive) "Voice active" else "Start voice",
+                        tint = Color.White,
+                        modifier = Modifier.size(if (isActive) 24.dp else 22.dp),
+                    )
+                }
             }
         }
     }
         Text(
             text = appVersionLabel,
-            color = LitterTheme.textMuted.copy(alpha = 0.8f),
+            color = if (DebugSettings.enabled) LitterTheme.accent.copy(alpha = 0.6f) else LitterTheme.textMuted.copy(alpha = 0.8f),
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 2.dp),
+                .padding(bottom = 2.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        DebugSettings.setEnabled(context, !DebugSettings.enabled)
+                    },
+                ),
         )
     } // close Box
 

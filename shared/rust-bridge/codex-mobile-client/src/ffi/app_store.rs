@@ -377,7 +377,11 @@ impl AppStore {
         self.inner.recorder.is_recording()
     }
 
-    pub async fn start_replay(&self, data: String, target_key: ThreadKey) -> Result<(), ClientError> {
+    pub async fn start_replay(
+        &self,
+        data: String,
+        target_key: ThreadKey,
+    ) -> Result<(), ClientError> {
         let entries = crate::recorder::MessageRecorder::replay_entries(
             &data,
             &target_key.server_id,

@@ -58,6 +58,7 @@ fun LitterApp(appModel: AppModel) {
         TextSizePrefs.initialize(context)
         ConversationPrefs.initialize(context)
         ExperimentalFeatures.initialize(context)
+        com.litter.android.state.DebugSettings.initialize(context)
     }
 
     // Read currentStep so Compose tracks it as a dependency and recomposes on change.
